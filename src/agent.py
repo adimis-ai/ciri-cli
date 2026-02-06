@@ -1009,10 +1009,6 @@ class Ciri(BaseModel):
         )
 
 
-# Rebuild model to resolve forward references and ensure all types are fully defined
-# Workaround for langchain_mcp_adapters bug: it imports Path under TYPE_CHECKING
-# but uses it in type annotations with PEP 563 (from __future__ import annotations).
-# This causes Pydantic to fail when resolving forward references.
 import langchain_mcp_adapters.sessions
 
 langchain_mcp_adapters.sessions.Path = Path
