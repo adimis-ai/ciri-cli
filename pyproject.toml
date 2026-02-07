@@ -42,7 +42,8 @@ dependencies = [
     "opentelemetry-exporter-otlp",
     "packaging",
     "platformdirs",
-    "importlib-metadata; python_version<'3.13'"
+    "importlib-metadata; python_version<'3.13'",
+    "black>=26.1.0",
 ]
 
 [project.optional-dependencies]

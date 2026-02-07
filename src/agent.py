@@ -2,36 +2,27 @@ from __future__ import annotations
 import os
 import asyncio
 import threading
-import httpx
 from pathlib import Path
 from dotenv import load_dotenv
 
 
 from browser_use import Browser
+from functools import cached_property
 from langchain.agents import AgentState
-from langchain_openai import ChatOpenAI
 from langgraph.types import Checkpointer
 from langchain_core.tools import BaseTool
 from langgraph.store.base import BaseStore
 from langgraph.cache.base import BaseCache
 from crawl4ai import ProxyConfig, BrowserConfig
 from deepagents.backends import FilesystemBackend
+from deepagents import SubAgent, CompiledSubAgent
+from langchain.agents.middleware import AgentMiddleware
 from browser_use.llm.openrouter.chat import ChatOpenRouter
 from langchain_community.tools import DuckDuckGoSearchResults
+from langchain.chat_models import init_chat_model, BaseChatModel
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from deepagents import SubAgent, CompiledSubAgent
 from browser_use.browser.profile import BrowserProfile, ProxySettings
-from langchain.agents.middleware import AgentMiddleware, TodoListMiddleware
-from typing import (
-    Optional,
-    List,
-    Dict,
-    Literal,
-    Union,
-    Any,
-    Sequence,
-    Mapping,
-)
+from typing import Optional, List, Dict, Literal, Union, Any, Sequence, Mapping, Tuple
 from typing_extensions import NotRequired, TypedDict
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents.middleware.shell_tool import (
@@ -45,15 +36,7 @@ from deepagents.middleware.skills import SkillsState
 from langchain.agents.middleware.todo import PlanningState
 from deepagents.middleware.filesystem import FilesystemState
 
-from .middlewares import (
-    DocumentsState,
-    ConsciousnessState,
-    FrontendToolResponse,
-    ConsciousnessMiddleware,
-    FrontendToolsMiddleware,
-    ArtifactsLoaderMiddleware,
-    FrontendToolsInterruptValue,
-)
+
 from .toolkit import (
     build_web_surfer_tool,
     build_web_crawler_tool,
@@ -83,7 +66,6 @@ You have a virtualized filesystem with persistent storage at these paths:
 
 - `/memory/` — Long-term memory that persists across sessions. Store facts, preferences, and context worth retaining.
 - `/skills/` — Structured skill definitions. Read relevant skills before domain-specific tasks to inform your approach.
-- `/artifacts/` — Generated outputs and user uploads. Write deliverables and results here.
 
 The root path `/` maps to the user's real local filesystem. All file operations have real-world impact.
 
@@ -131,39 +113,105 @@ class LLMConfig(BaseModel):
     """Configuration for language models."""
 
     model: str = Field(
-        description="The language model to use for the agent, e.g., 'openai/gpt-5-mini'."
+        description="The language model to use, e.g. 'openai/gpt-5-mini' or 'openai:gpt-4'."
     )
-    model_kwargs: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional keyword arguments to pass to the language model.",
-    )
+    model_kwargs: Dict[str, Any] = Field(default_factory=dict)
 
-    def _get_api_config(self) -> Dict[str, Any]:
-        """Extract API configuration with defaults."""
-        config = self.model_kwargs.copy()
+    @cached_property
+    def _parsed_model(self) -> Tuple[str | None, str]:
+        """
+        Parse model string once.
 
-        if "base_url" not in config:
-            config["base_url"] = os.getenv(
-                "OPENROUTER_API_BASE_URL", DEFAULT_OPENROUTER_BASE_URL
+        Returns:
+            (provider, model_name)
+        """
+        if "/" in self.model:  # openrouter format
+            return tuple(self.model.split("/", 1))
+        if ":" in self.model:  # direct provider format
+            return tuple(self.model.split(":", 1))
+        return None, self.model
+
+    @cached_property
+    def _is_openrouter(self) -> bool:
+        return "/" in self.model
+
+    @cached_property
+    def _resolved_api_config(self) -> Dict[str, Any]:
+        """
+        Resolve API config once and cache.
+        Avoid repeated env access + dict copies.
+        """
+        config = dict(self.model_kwargs)  # single copy
+
+        # Fast path if api_key already provided
+        if "api_key" in config:
+            if self._is_openrouter and "base_url" not in config:
+                config["base_url"] = os.getenv(
+                    "OPENROUTER_API_BASE_URL", DEFAULT_OPENROUTER_BASE_URL
+                )
+            return config
+
+        provider, _ = self._parsed_model
+
+        if self._is_openrouter:
+            config.setdefault(
+                "base_url",
+                os.getenv("OPENROUTER_API_BASE_URL", DEFAULT_OPENROUTER_BASE_URL),
             )
-
-        if "api_key" not in config:
             api_key = os.getenv("OPENROUTER_API_KEY")
             if not api_key:
-                raise ValueError("OPENROUTER_API_KEY environment variable not set.")
+                raise ValueError("OPENROUTER_API_KEY env variable not set.")
             config["api_key"] = api_key
+            return config
 
+        # Direct provider key lookup
+        if not provider:
+            raise ValueError(f"Provider missing in model: {self.model}")
+
+        env_key = f"{provider.upper()}_API_KEY"
+        api_key = os.getenv(env_key)
+        if not api_key:
+            raise ValueError(f"{env_key} env variable not set for {self.model}")
+
+        config["api_key"] = api_key
         return config
 
-    def init_langchain_model(self) -> ChatOpenAI:
-        """Initialize LangChain ChatOpenAI model."""
-        return ChatOpenAI(model=self.model, **self._get_api_config())
+    def init_langchain_model(self) -> BaseChatModel:
+        """
+        Initialize LangChain chat model.
+        Zero redundant env reads or parsing.
+        """
+        provider, model_name = self._parsed_model
+        config = self._resolved_api_config
+
+        if self._is_openrouter:
+            # avoid dict rebuild via pop-free filtering
+            base_url = config.get("base_url")
+            api_key = config["api_key"]
+
+            extra = {
+                k: v for k, v in config.items() if k not in ("api_key", "base_url")
+            }
+
+            return init_chat_model(
+                model=model_name,
+                model_provider=provider,
+                base_url=base_url,
+                api_key=api_key,
+                **extra,
+            )
+
+        return init_chat_model(model=self.model, **config)
 
     def init_browser_use_model(self) -> ChatOpenRouter:
-        """Initialize Browser Use ChatOpenRouter model."""
-        config = self._get_api_config()
-        # Remove base_url for ChatOpenRouter if present
-        config.pop("base_url", None)
+        """
+        Initialize Browser-Use OpenRouter model.
+        """
+        if not self._is_openrouter:
+            raise ValueError("BrowserUse requires an OpenRouter model.")
+
+        # shallow copy to avoid mutation of cached config
+        config = {k: v for k, v in self._resolved_api_config.items() if k != "base_url"}
         return ChatOpenRouter(model=self.model, **config)
 
 
@@ -335,22 +383,79 @@ class SerializableSubAgent(BaseModel):
     include_web_surfer_tool: bool = True
     include_web_crawler_tool: bool = True
     include_follow_up_with_human_tool: bool = True
-    include_frontend_tools: Union[Literal["*"], List[str]] = "*"
-    exclude_frontend_tools: Optional[List[str]] = None
-    include_consciousness_middleware: bool = True
     include_shell_tool_middleware: bool = True
     llm_config: Optional[LLMConfig] = None
     interrupt_on: Optional[Dict[str, Any]] = (
         None  # Union[bool, InterruptOnConfig] - Any used for Pydantic compatibility
     )
-    consciousness_max_reflection_loops: int = 3
-    consciousness_instructions: Optional[Dict[Literal["thinker", "observer"], str]] = (
-        None
-    )
     shell_tool_config: Optional[ShellToolConfig] = None
-    # MCP connections - using Dict[str, Any] for Pydantic compatibility
-    # (the actual types contain Protocol classes that Pydantic can't validate)
     mcp_connections: Optional[Dict[str, Any]] = None
+
+
+class ActionRequest(TypedDict):
+    name: str
+    description: str
+    arguments: NotRequired[dict[str, Any]]
+
+
+class ReviewConfig(TypedDict):
+    action_name: str
+    allowed_decisions: list[Literal["approve", "edit", "reject"]]
+
+
+class HumanInTheLoopInterrupt(TypedDict):
+    review_configs: list[ReviewConfig]
+    action_requests: list[ActionRequest]
+
+
+class InterruptValue(TypedDict):
+    value: Union[HumanInTheLoopInterrupt, FollowUpInterruptValue]
+
+
+class ApprovalDecision(TypedDict):
+    type: Literal["approve"]
+
+
+class EditedAction(TypedDict):
+    name: str
+    args: dict[str, Any]
+
+
+class EditDecision(TypedDict):
+    type: Literal["edit"]
+    edited_action: EditedAction
+
+
+class RejectDecision(TypedDict):
+    type: Literal["reject"]
+    message: NotRequired[str]
+
+
+class ApprovalDecisions(TypedDict):
+    decisions: list[ApprovalDecision]
+
+
+class EditDecisions(TypedDict):
+    decisions: list[EditDecision]
+
+
+class RejectDecisions(TypedDict):
+    decisions: list[RejectDecision]
+
+
+class ResumeCommand(TypedDict):
+    resume: Union[ApprovalDecisions, EditDecisions, RejectDecisions]
+
+
+class CiriState(
+    AgentState[Any],
+    MemoryState,
+    SkillsState,
+    ShellToolState,
+    FilesystemState,
+    PlanningState,
+):
+    __interrupt__: NotRequired[Optional[List[InterruptValue]]]
 
 
 # Helper Classes
@@ -363,7 +468,7 @@ class FileSystemScanner:
 
     def _ensure_directories(self) -> None:
         """Create required directories if they don't exist."""
-        for folder in ("memory", "skills", "artifacts", "artifacts/user_uploads"):
+        for folder in ("memory", "skills"):
             (self.root_dir / folder).mkdir(parents=True, exist_ok=True)
 
     def scan_memory_paths(self) -> List[str]:
@@ -385,22 +490,6 @@ class FileSystemScanner:
         for p in sorted(skills_dir.glob("*/SKILL.md")):
             if p.is_file():
                 paths.append(f"/skills/{p.parent.name}/SKILL.md")
-
-        return paths
-
-    def scan_artifact_paths(self) -> List[str]:
-        """Scan and return artifact directory paths."""
-        paths = ["/artifacts/", "/artifacts/user_uploads/"]
-        seen = set(paths)
-        artifacts_dir = self.root_dir / "artifacts"
-
-        for p in sorted(artifacts_dir.rglob("*")):
-            if p.is_dir():
-                rel = p.relative_to(artifacts_dir)
-                vpath = f"/artifacts/{rel}/"
-                if vpath not in seen:
-                    seen.add(vpath)
-                    paths.append(vpath)
 
         return paths
 
@@ -442,44 +531,12 @@ class MiddlewareBuilder:
         llm_config: LLMConfig,
         memory_paths: List[str],
         skills_paths: List[str],
-        artifact_paths: List[str],
     ):
         self.root_dir = root_dir
         self.backend = backend
         self.llm_config = llm_config
         self.memory_paths = memory_paths
         self.skills_paths = skills_paths
-        self.artifact_paths = artifact_paths
-
-    def build_consciousness_middleware(
-        self,
-        debug: bool = False,
-        cache: Optional[BaseCache] = None,
-        subagents: Optional[List[Union[SubAgent, CompiledSubAgent]]] = None,
-        max_reflection_loops: int = 3,
-        instructions: Optional[Dict[Literal["thinker", "observer"], str]] = None,
-        middleware: Optional[List[AgentMiddleware]] = None,
-    ) -> ConsciousnessMiddleware:
-        """Build consciousness middleware."""
-        return ConsciousnessMiddleware(
-            debug=debug,
-            cache=cache,
-            memory=self.memory_paths,
-            skills=self.skills_paths,
-            subagents=subagents,
-            artifacts=self.artifact_paths,
-            middleware=middleware,
-            model=self.llm_config.init_langchain_model(),
-            instructions=instructions,
-            max_reflection_loops=max_reflection_loops,
-        )
-
-    def build_artifacts_loader_middleware(self) -> ArtifactsLoaderMiddleware:
-        """Build artifacts loader middleware."""
-        return ArtifactsLoaderMiddleware(
-            backend=self.backend,
-            artifacts_folder="/artifacts",
-        )
 
     def build_shell_tool_middleware(
         self,
@@ -593,7 +650,6 @@ class SubAgentCompiler:
         scanner = FileSystemScanner(root_dir)
         self.memory_paths = scanner.scan_memory_paths()
         self.skills_paths = scanner.scan_skills_paths()
-        self.artifact_paths = scanner.scan_artifact_paths()
 
     def compile(
         self,
@@ -673,26 +729,7 @@ class SubAgentCompiler:
             llm_config=llm_config,
             memory_paths=self.memory_paths,
             skills_paths=self.skills_paths,
-            artifact_paths=self.artifact_paths,
         )
-
-        # if subagent_config.include_consciousness_middleware:
-        #     middleware_list.append(
-        #         middleware_builder.build_consciousness_middleware(
-        #             debug=debug,
-        #             cache=cache,
-        #             instructions=subagent_config.consciousness_instructions,
-        #             max_reflection_loops=subagent_config.consciousness_max_reflection_loops,
-        #         )
-        #     )
-
-        if subagent_config.include_frontend_tools:
-            middleware_list.append(
-                FrontendToolsMiddleware(
-                    include_tools=subagent_config.include_frontend_tools,
-                    exclude_tools=subagent_config.exclude_frontend_tools,
-                )
-            )
 
         if subagent_config.include_shell_tool_middleware:
             shell_config = subagent_config.shell_tool_config or self.parent_shell_config
@@ -705,78 +742,6 @@ class SubAgentCompiler:
         return middleware_list
 
 
-class ActionRequest(TypedDict):
-    name: str
-    description: str
-    arguments: NotRequired[dict[str, Any]]
-
-
-class ReviewConfig(TypedDict):
-    action_name: str
-    allowed_decisions: list[Literal["approve", "edit", "reject"]]
-
-
-class HumanInTheLoopInterrupt(TypedDict):
-    review_configs: list[ReviewConfig]
-    action_requests: list[ActionRequest]
-
-
-class InterruptValue(TypedDict):
-    value: Union[
-        HumanInTheLoopInterrupt, FollowUpInterruptValue, FrontendToolsInterruptValue
-    ]
-
-
-class ApprovalDecision(TypedDict):
-    type: Literal["approve"]
-
-
-class EditedAction(TypedDict):
-    name: str
-    args: dict[str, Any]
-
-
-class EditDecision(TypedDict):
-    type: Literal["edit"]
-    edited_action: EditedAction
-
-
-class RejectDecision(TypedDict):
-    type: Literal["reject"]
-    message: NotRequired[str]
-
-
-class ApprovalDecisions(TypedDict):
-    decisions: list[ApprovalDecision]
-
-
-class EditDecisions(TypedDict):
-    decisions: list[EditDecision]
-
-
-class RejectDecisions(TypedDict):
-    decisions: list[RejectDecision]
-
-
-class ResumeCommand(TypedDict):
-    resume: Union[
-        ApprovalDecisions, EditDecisions, RejectDecisions, FrontendToolResponse
-    ]
-
-
-class CiriState(
-    AgentState[Any],
-    ConsciousnessState[Any],
-    MemoryState,
-    SkillsState,
-    ShellToolState,
-    FilesystemState,
-    PlanningState,
-    DocumentsState,
-):
-    __interrupt__: NotRequired[Optional[List[InterruptValue]]]
-
-
 # Main Agent Class
 class Ciri(BaseModel):
     """CIRI agent configuration and compilation."""
@@ -785,23 +750,15 @@ class Ciri(BaseModel):
     instructions: Optional[str] = None
     filesystem_virtual_mode: bool = False
     filesystem_max_file_size_mb: int = 10
-    consciousness_max_reflection_loops: int = 3
     filesystem_root_dir: Optional[Union[str, Path]] = None
     shell_tool_config: Optional[ShellToolConfig] = None
     subagents: Optional[List[SerializableSubAgent]] = None
-    interrupt_on: Optional[Dict[str, Any]] = (
+    interrupt_on: Optional[Union[bool, Dict[str, Any]]] = (
         None  # Union[bool, InterruptOnConfig] - Any used for Pydantic compatibility
     )
-    include_frontend_tools: Union[Literal["*"], List[str]] = "*"
-    exclude_frontend_tools: Optional[List[str]] = None
     include_follow_up_with_human_tool: bool = True
     crawler_browser_config: Optional[WebCrawlerBrowserConfig] = None
     web_surfer_browser_config: Optional[WebSurferBrowserConfig] = None
-    consciousness_instructions: Optional[Dict[Literal["thinker", "observer"], str]] = (
-        None
-    )
-    # MCP connections - using Dict[str, Any] for Pydantic compatibility
-    # (the actual types contain Protocol classes that Pydantic can't validate)
     mcp_connections: Optional[Dict[str, Any]] = None
 
     @field_validator("filesystem_root_dir", mode="before")
@@ -872,7 +829,6 @@ class Ciri(BaseModel):
         tools: Optional[List[BaseTool]] = None,
         response_format: Optional[BaseModel] = None,
         middleware: Optional[List[AgentMiddleware]] = None,
-        consciousness_middleware: Optional[List[AgentMiddleware]] = None,
     ):
         """Create the CIRI agent instance (private method)."""
         root_dir = self._get_root_dir()
@@ -884,7 +840,6 @@ class Ciri(BaseModel):
         scanner = FileSystemScanner(root_dir)
         memory_paths = scanner.scan_memory_paths()
         skills_paths = scanner.scan_skills_paths()
-        artifact_paths = scanner.scan_artifact_paths()
 
         # Create backend
         backend = FilesystemBackend(
@@ -900,32 +855,14 @@ class Ciri(BaseModel):
             llm_config=self.llm_config,
             memory_paths=memory_paths,
             skills_paths=skills_paths,
-            artifact_paths=artifact_paths,
         )
 
         middleware_stack = [
             *(middleware or []),
         ]
 
-        if self.include_frontend_tools:
-            middleware_stack.append(
-                FrontendToolsMiddleware(
-                    include_tools=self.include_frontend_tools,
-                    exclude_tools=self.exclude_frontend_tools,
-                )
-            )
-
         middleware_stack.extend(
             [
-                # middleware_builder.build_consciousness_middleware(
-                #     debug=debug,
-                #     cache=cache,
-                #     subagents=compiled_subagents,
-                #     max_reflection_loops=self.consciousness_max_reflection_loops,
-                #     instructions=self.consciousness_instructions,
-                #     middleware=consciousness_middleware,
-                # ),
-                middleware_builder.build_artifacts_loader_middleware(),
                 middleware_builder.build_shell_tool_middleware(self.shell_tool_config),
             ]
         )
@@ -978,7 +915,6 @@ class Ciri(BaseModel):
         tools: Optional[List[BaseTool]] = None,
         response_format: Optional[BaseModel] = None,
         middleware: Optional[List[AgentMiddleware]] = None,
-        consciousness_middleware: Optional[List[AgentMiddleware]] = None,
     ):
         """Compile the CIRI agent with all configurations."""
         # Initialize browsers
@@ -1005,7 +941,6 @@ class Ciri(BaseModel):
             tools=tools,
             response_format=response_format,
             middleware=middleware,
-            consciousness_middleware=consciousness_middleware,
         )
 
 

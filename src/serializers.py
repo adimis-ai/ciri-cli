@@ -51,14 +51,24 @@ class CiriJsonPlusSerializer(JsonPlusSerializer):
             return None
         elif isinstance(obj, (str, int, float, bool)):
             return obj
-        elif hasattr(obj, "__class__") and obj.__class__.__name__ == "Send" and hasattr(obj, "node") and hasattr(obj, "arg"):
+        elif (
+            hasattr(obj, "__class__")
+            and obj.__class__.__name__ == "Send"
+            and hasattr(obj, "node")
+            and hasattr(obj, "arg")
+        ):
             # Convert Send object to serializable dict
             return {
                 "__send_object__": True,
                 "node": obj.node,
                 "arg": self._make_serializable(obj.arg),
             }
-        elif hasattr(obj, "__class__") and obj.__class__.__name__ in ["lock", "_thread.lock", "Lock", "RLock"]:
+        elif hasattr(obj, "__class__") and obj.__class__.__name__ in [
+            "lock",
+            "_thread.lock",
+            "Lock",
+            "RLock",
+        ]:
             # Skip thread locks and other thread-related objects
             return {"__thread_lock__": True, "type": obj.__class__.__name__}
         elif hasattr(obj, "__class__") and "Session" in obj.__class__.__name__:
@@ -74,7 +84,10 @@ class CiriJsonPlusSerializer(JsonPlusSerializer):
             for k, v in obj.__dict__.items():
                 try:
                     # Skip attributes that might contain locks or other non-serializable objects
-                    if k.lower() in ['lock', 'session', 'tempdir', 'policy'] or 'lock' in k.lower():
+                    if (
+                        k.lower() in ["lock", "session", "tempdir", "policy"]
+                        or "lock" in k.lower()
+                    ):
                         result[k] = {"__skipped__": True, "reason": "non-serializable"}
                     else:
                         result[k] = self._make_serializable(v)
@@ -89,13 +102,17 @@ class CiriJsonPlusSerializer(JsonPlusSerializer):
                     try:
                         result[slot] = self._make_serializable(getattr(obj, slot))
                     except Exception:
-                        result[slot] = {"__skipped__": True, "reason": "serialization_error"}
+                        result[slot] = {
+                            "__skipped__": True,
+                            "reason": "serialization_error",
+                        }
             return result
         else:
             # Try to convert to string for non-serializable objects
             try:
                 # Test if it's JSON serializable
                 import json
+
                 json.dumps(obj)
                 return obj
             except (TypeError, ValueError):
@@ -128,9 +145,9 @@ class CiriJsonPlusSerializer(JsonPlusSerializer):
         elif hasattr(value, "__class__") and value.__class__.__name__ == "Send":
             # Convert Send object to a serializable form
             return {
-                "_type": "Send", 
-                "node": value.node, 
-                "arg": self._serialize_value(value.arg)
+                "_type": "Send",
+                "node": value.node,
+                "arg": self._serialize_value(value.arg),
             }
         elif isinstance(value, dict):
             return {k: self._serialize_value(v) for k, v in value.items()}
@@ -375,7 +392,9 @@ class CiriSerializer:
             Deserialized InterruptValue
         """
         try:
-            return {"value": data["value"]}  # Return dict directly since InterruptValue is a TypedDict
+            return {
+                "value": data["value"]
+            }  # Return dict directly since InterruptValue is a TypedDict
         except Exception as e:
             logger.error(f"Failed to deserialize interrupt: {e}")
             return {"value": {"error": f"Deserialization failed: {e}"}}
@@ -427,14 +446,22 @@ class CiriSerializer:
         elif hasattr(value, "dict"):
             return value.dict()
         # Handle LangGraph Send objects specifically
-        elif hasattr(value, "__class__") and value.__class__.__name__ == "Send" and hasattr(value, "node") and hasattr(value, "arg"):
+        elif (
+            hasattr(value, "__class__")
+            and value.__class__.__name__ == "Send"
+            and hasattr(value, "node")
+            and hasattr(value, "arg")
+        ):
             return {
                 "_type": "Send",
                 "node": value.node,
                 "arg": CiriSerializer._serialize_value(value.arg),
             }
         # Handle other LangGraph types
-        elif hasattr(value, "__class__") and value.__class__.__module__ == "langgraph.types":
+        elif (
+            hasattr(value, "__class__")
+            and value.__class__.__module__ == "langgraph.types"
+        ):
             # Handle Command objects
             if value.__class__.__name__ == "Command":
                 result = {"_type": "Command"}
@@ -451,7 +478,9 @@ class CiriSerializer:
                 if hasattr(value, "__slots__"):
                     for slot in value.__slots__:
                         if hasattr(value, slot):
-                            result[slot] = CiriSerializer._serialize_value(getattr(value, slot))
+                            result[slot] = CiriSerializer._serialize_value(
+                                getattr(value, slot)
+                            )
                 elif hasattr(value, "__dict__"):
                     for k, v in value.__dict__.items():
                         result[k] = CiriSerializer._serialize_value(v)
@@ -533,8 +562,13 @@ class CiriJSONEncoder(json.JSONEncoder):
             if isinstance(obj, StateSnapshot):
                 return serialize_state_snapshot(obj)
 
-            # Handle LangGraph Send objects specifically  
-            if hasattr(obj, "__class__") and obj.__class__.__name__ == "Send" and hasattr(obj, "node") and hasattr(obj, "arg"):
+            # Handle LangGraph Send objects specifically
+            if (
+                hasattr(obj, "__class__")
+                and obj.__class__.__name__ == "Send"
+                and hasattr(obj, "node")
+                and hasattr(obj, "arg")
+            ):
                 return {
                     "_type": "Send",
                     "node": obj.node,
@@ -542,7 +576,10 @@ class CiriJSONEncoder(json.JSONEncoder):
                 }
 
             # Handle other LangGraph types (Send, Command, etc.)
-            if hasattr(obj, "__class__") and obj.__class__.__module__ == "langgraph.types":
+            if (
+                hasattr(obj, "__class__")
+                and obj.__class__.__module__ == "langgraph.types"
+            ):
                 return CiriSerializer._serialize_value(obj)
 
             # Handle InterruptValue

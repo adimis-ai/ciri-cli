@@ -16,7 +16,6 @@ from langgraph.graph.state import CompiledStateGraph
 from .agent import Ciri, ResumeCommand
 from .serializers import CiriJsonPlusSerializer
 
-
 load_dotenv()
 logger = logging.getLogger(__name__)
 

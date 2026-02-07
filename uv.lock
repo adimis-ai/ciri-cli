@@ -623,6 +623,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
+    { name = "black" },
     { name = "browser-use" },
     { name = "crawl4ai" },
     { name = "cryptography" },
@@ -681,6 +682,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anyio" },
+    { name = "black", specifier = ">=26.1.0" },
     { name = "black", marker = "extra == 'dev'" },
     { name = "browser-use" },
     { name = "build", marker = "extra == 'dev'" },

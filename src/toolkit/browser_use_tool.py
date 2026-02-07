@@ -62,7 +62,7 @@ def build_web_surfer_tool(
     # Wrapper functions that pass the browser instance
     async def async_wrapper(task: str) -> AgentHistoryList:
         return await run_browser_task(task, _browser)
-    
+
     def sync_wrapper(task: str) -> AgentHistoryList:
         return sync_browser_task(task, _browser)
 
