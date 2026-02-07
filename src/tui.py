@@ -30,6 +30,7 @@ from rich.panel import Panel
 
 from .agent import Ciri, LLMConfig
 from .controllers import CiriController, CiriConfig
+from .utils import get_app_data_dir, get_default_filesystem_root
 
 # Next-Gen CSS for Ciri
 CSS = """
@@ -72,7 +73,7 @@ Screen {
 
 .thread-item {
     padding: 1;
-    border-bottom: thin $border;
+    border-bottom: solid $border;
 }
 
 .thread-item:hover {
@@ -98,7 +99,6 @@ Screen {
 .message {
     margin: 1 0;
     padding: 1 2;
-    border-radius: 4;
 }
 
 .user-message {
@@ -208,20 +208,9 @@ class CiriApp(App):
         self.current_thread_id: Optional[str] = None
         self.is_streaming = False
 
-    def get_root_dir(self) -> Path:
-        """Determine root directory based on OS."""
-        system = platform.system()
-        user_home = Path.home()
-
-        if system == "Windows":
-            root = user_home / "Documents" / "Ciri"
-        elif system == "Darwin":
-            root = user_home / "Library" / "Application Support" / "Ciri"
-        else:  # Linux and others
-            root = user_home / ".local" / "share" / "ciri"
-
-        root.mkdir(parents=True, exist_ok=True)
-        return root
+    def get_app_data_dir(self) -> Path:
+        """Determine app data directory."""
+        return get_app_data_dir()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -268,18 +257,19 @@ class CiriApp(App):
 
     async def on_mount(self) -> None:
         """Initialize CiriController."""
-        self.run_worker(self.initialize_agent(), thread=True)
+        self.initialize_agent()
 
-    @work(exclusive=True)
-    async def initialize_agent(self) -> None:
+    @work(exclusive=True, thread=True)
+    def initialize_agent(self) -> None:
         """Background worker to initialize the agent."""
-        root_dir = self.get_root_dir()
-        self.call_from_thread(self.update_status, f"Root: {root_dir}")
+        app_data_dir = self.get_app_data_dir()
+        workspace_root = get_default_filesystem_root()
+        self.call_from_thread(self.update_status, f"Workspace: {workspace_root}")
 
         try:
             config = CiriConfig.from_env()
             if not config.sqlite_url:
-                db_path = root_dir / "ciri.db"
+                db_path = app_data_dir / "ciri.db"
                 config.sqlite_url = f"sqlite:///{db_path}"
 
             self.controller = CiriController(config=config)
@@ -373,10 +363,10 @@ class CiriApp(App):
 
         event.input.value = ""
         self.post_message_to_history(content, "user")
-        self.run_worker(self.process_chat(content), thread=True)
+        self.process_chat(content)
 
-    @work(exclusive=True)
-    async def process_chat(self, user_input: str) -> None:
+    @work(exclusive=True, thread=True)
+    def process_chat(self, user_input: str) -> None:
         """Process chat in background thread."""
         self.is_streaming = True
         self.call_from_thread(self.show_loader, True)
@@ -457,10 +447,10 @@ class CiriApp(App):
     def submit_resume(self, resume_data: Any) -> None:
         self.query_one("#interrupt-panel").display = False
         self.query_one("#user-input").disabled = False
-        self.run_worker(self.resume_agent(resume_data), thread=True)
+        self.resume_agent(resume_data)
 
-    @work(exclusive=True)
-    async def resume_agent(self, resume_data: Any) -> None:
+    @work(exclusive=True, thread=True)
+    def resume_agent(self, resume_data: Any) -> None:
         self.is_streaming = True
         self.call_from_thread(self.show_loader, True)
         try:

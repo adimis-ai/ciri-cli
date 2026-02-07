@@ -1,5 +1,7 @@
 import os
 import asyncio
+import platform
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -44,3 +46,24 @@ def install_embedding_model():
         logger.info("Successfully installed embedding model")
     except Exception as e:
         logger.error(f"Failed to install embedding model: {e}")
+
+
+def get_default_filesystem_root() -> Path:
+    """Return the current working directory as the default filesystem root."""
+    return Path(os.getcwd()).resolve()
+
+
+def get_app_data_dir() -> Path:
+    """Determine OS-specific application data directory for Ciri."""
+    system = platform.system()
+    user_home = Path.home()
+
+    if system == "Windows":
+        root = user_home / "AppData" / "Local" / "Ciri"
+    elif system == "Darwin":
+        root = user_home / "Library" / "Application Support" / "Ciri"
+    else:  # Linux and others
+        root = user_home / ".local" / "share" / "ciri"
+
+    root.mkdir(parents=True, exist_ok=True)
+    return root

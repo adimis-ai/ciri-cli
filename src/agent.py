@@ -54,6 +54,7 @@ from .toolkit import (
     follow_up_with_human,
     FollowUpInterruptValue,
 )
+from .utils import get_default_filesystem_root
 
 load_dotenv()
 
@@ -192,7 +193,7 @@ class LLMConfig(BaseModel):
 
             return init_chat_model(
                 model=model_name,
-                model_provider=provider,
+                model_provider="openai",
                 base_url=base_url,
                 api_key=api_key,
                 **extra,
@@ -883,7 +884,7 @@ class Ciri(BaseModel):
         self,
         store: BaseStore,
         checkpointer: Checkpointer,
-        filesystem_root_dir: Union[str, Path],
+        filesystem_root_dir: Optional[Union[str, Path]] = None,
         *,
         debug: bool = False,
         cache: Optional[BaseCache] = None,
@@ -893,7 +894,7 @@ class Ciri(BaseModel):
         middleware: Optional[List[AgentMiddleware]] = None,
     ):
         if not filesystem_root_dir:
-            raise ValueError("filesystem_root_dir is required")
+            filesystem_root_dir = get_default_filesystem_root()
 
         root_dir = Path(filesystem_root_dir).resolve()
 

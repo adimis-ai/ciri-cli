@@ -298,22 +298,19 @@ class CiriController:
         ciri: Ciri,
         *,
         debug: bool = False,
-        context_schema: Optional[Any] = None,
         tools: Optional[list] = None,
         response_format: Optional[Any] = None,
         middleware: Optional[list] = None,
-        consciousness_middleware: Optional[list] = None,
+        filesystem_root_dir: Optional[str] = None,
     ) -> None:
         """Compile the Ciri agent with configured components.
 
         Args:
             ciri: The Ciri agent instance to compile.
             debug: Enable debug mode for the agent.
-            context_schema: Optional context schema for the agent.
             tools: Optional additional tools to include.
             response_format: Optional response format (Pydantic model).
             middleware: Optional additional middleware.
-            consciousness_middleware: Optional middleware for consciousness layer.
         """
         self.ciri = ciri
 
@@ -323,11 +320,10 @@ class CiriController:
             checkpointer=self._checkpointer,
             debug=debug,
             cache=self._cache,
-            context_schema=context_schema,
             tools=tools,
             response_format=response_format,
             middleware=middleware,
-            consciousness_middleware=consciousness_middleware,
+            filesystem_root_dir=filesystem_root_dir,
         )
 
     def stream(
