@@ -2,8 +2,8 @@ import os
 import sqlite3
 import logging
 from dotenv import load_dotenv
-from typing import Optional, Any, Iterator
 from dataclasses import dataclass
+from typing import Optional, Any, Iterator, List
 
 
 from langgraph.graph import MessagesState
@@ -84,10 +84,25 @@ class _CacheManager:
     def __init__(self):
         self._embeddings = None
         self._store = None
-        self._store_context = None
         self._checkpointer = None
-        self._checkpointer_context = None
+        self._conn = None
+        self._sqlite_url = None
         self._initialized = False
+
+    def _get_connection(self, sqlite_url: str) -> sqlite3.Connection:
+        """Get or create the shared SQLite connection."""
+        if self._conn is None or self._sqlite_url != sqlite_url:
+            if self._conn:
+                self._conn.close()
+            db_path = _parse_sqlite_url(sqlite_url)
+            logger.info(f"Connecting to shared SQLite database at: {db_path}")
+            self._conn = sqlite3.connect(
+                db_path,
+                check_same_thread=False,
+                isolation_level=None,  # autocommit mode for store/checkpointer compatibility
+            )
+            self._sqlite_url = sqlite_url
+        return self._conn
 
     def get_embeddings(self):
         """Get or create the cached embeddings instance."""
@@ -103,27 +118,13 @@ class _CacheManager:
 
     def get_store(self, sqlite_url: str, config: CiriConfig) -> SqliteStore:
         """Get or create the cached SqliteStore instance."""
-        if self._store is None or self._store_context != sqlite_url:
+        if self._store is None or self._sqlite_url != sqlite_url:
             logger.info("Initializing SqliteStore...")
             try:
-                db_path = _parse_sqlite_url(sqlite_url)
-                logger.info(f"Using SQLite database at: {db_path}")
-                conn = sqlite3.connect(
-                    db_path,
-                    check_same_thread=False,
-                    isolation_level=None,  # autocommit mode
-                )
-                self._store = SqliteStore(
-                    conn,
-                    # index={
-                    #     "embed": self.get_embeddings(),
-                    #     "dims": config.embedding_dims,
-                    #     "fields": config.embedding_index_fields.split(","),
-                    # },
-                )
+                conn = self._get_connection(sqlite_url)
+                self._store = SqliteStore(conn)
                 # Setup the store after creation
                 self._store.setup()
-                self._store_context = sqlite_url
                 logger.info("SqliteStore initialized and cached")
             except Exception as e:
                 logger.error(f"Failed to initialize SqliteStore: {e}")
@@ -132,21 +133,15 @@ class _CacheManager:
 
     def get_checkpointer(self, sqlite_url: str) -> SqliteSaver:
         """Get or create the cached SqliteSaver instance."""
-        if self._checkpointer is None or self._checkpointer_context != sqlite_url:
+        if self._checkpointer is None or self._sqlite_url != sqlite_url:
             logger.info("Initializing SqliteSaver...")
             try:
-                db_path = _parse_sqlite_url(sqlite_url)
-                logger.info(f"Using SQLite database at: {db_path}")
-                conn = sqlite3.connect(
-                    db_path,
-                    check_same_thread=False,
-                )
+                conn = self._get_connection(sqlite_url)
                 # Use our custom serializer that can handle Send objects
                 custom_serde = CiriJsonPlusSerializer(pickle_fallback=False)
                 self._checkpointer = SqliteSaver(conn, serde=custom_serde)
                 # Setup the checkpointer after creation
                 self._checkpointer.setup()
-                self._checkpointer_context = sqlite_url
                 logger.info("SqliteSaver initialized with custom serializer and cached")
             except Exception as e:
                 logger.error(f"Failed to initialize SqliteSaver: {e}")
@@ -207,7 +202,46 @@ class CiriController:
         )
         self._store = store
         self._checkpointer = checkpointer
+        self._conn = _cache_manager._get_connection(self.config.sqlite_url)
         self._cache = InMemoryCache()
+        self._initialize_threads_table()
+
+    def _initialize_threads_table(self) -> None:
+        """Initialize the threads table in SQLite."""
+        self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS threads (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """)
+
+    def list_threads(self) -> List[dict]:
+        """List all managed threads."""
+        self._conn.row_factory = sqlite3.Row
+        cursor = self._conn.execute("SELECT * FROM threads ORDER BY updated_at DESC")
+        return [dict(row) for row in cursor.fetchall()]
+
+    def create_thread(self, thread_id: str, title: Optional[str] = None) -> None:
+        """Create a new thread entry."""
+        if not title:
+            title = f"Thread {thread_id[:8]}"
+        self._conn.execute(
+            "INSERT OR IGNORE INTO threads (id, title) VALUES (?, ?)",
+            (thread_id, title),
+        )
+
+    def update_thread_title(self, thread_id: str, title: str) -> None:
+        """Update the title of a thread."""
+        self._conn.execute(
+            "UPDATE threads SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (title, thread_id),
+        )
+
+    def delete_thread(self, thread_id: str) -> None:
+        """Delete a thread and its entry."""
+        self._conn.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
 
     def _ensure_compiled(self) -> None:
         """Ensure the controller is compiled before operations."""
