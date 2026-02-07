@@ -198,32 +198,6 @@ class CiriController:
                 )
                 """)
 
-    def list_threads(self) -> List[dict]:
-        """List all managed threads."""
-        self._conn.row_factory = sqlite3.Row
-        cursor = self._conn.execute("SELECT * FROM threads ORDER BY updated_at DESC")
-        return [dict(row) for row in cursor.fetchall()]
-
-    def create_thread(self, thread_id: str, title: Optional[str] = None) -> None:
-        """Create a new thread entry."""
-        if not title:
-            title = f"Thread {thread_id[:8]}"
-        self._conn.execute(
-            "INSERT OR IGNORE INTO threads (id, title) VALUES (?, ?)",
-            (thread_id, title),
-        )
-
-    def update_thread_title(self, thread_id: str, title: str) -> None:
-        """Update the title of a thread."""
-        self._conn.execute(
-            "UPDATE threads SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (title, thread_id),
-        )
-
-    def delete_thread(self, thread_id: str) -> None:
-        """Delete a thread and its entry."""
-        self._conn.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
-
     def _ensure_compiled(self) -> None:
         """Ensure the controller is compiled before operations."""
         if not self.compiled_ciri:
@@ -236,6 +210,64 @@ class CiriController:
         if isinstance(input, dict) and "resume" in input:
             return Command(resume=input["resume"])
         return input
+
+    def _format_stream_item(
+        self, stream_item: Any, subgraphs: bool, stream_mode: list[str] | str
+    ) -> dict:
+        """Format a stream item into a consistent output format."""
+        try:
+            # Handle different tuple structures based on subgraphs and stream_mode
+            if subgraphs and isinstance(stream_mode, list):
+                # 3-tuple: (namespace, mode, payload)
+                namespace, mode, chunk = stream_item
+            elif isinstance(stream_mode, list):
+                # 2-tuple: (mode, payload)
+                mode, chunk = stream_item
+                namespace = None
+            elif subgraphs:
+                # 2-tuple: (namespace, payload)
+                namespace, chunk = stream_item
+                mode = stream_mode
+            else:
+                # Just payload
+                chunk = stream_item
+                mode = stream_mode
+                namespace = None
+
+            if mode == "updates":
+                if chunk is not None and "__interrupt__" in chunk:
+                    return {
+                        "type": "interrupt",
+                        "data": chunk["__interrupt__"],
+                        "namespace": namespace,
+                    }
+                else:
+                    return {
+                        "type": "update",
+                        "data": chunk,
+                        "namespace": namespace,
+                    }
+            elif mode == "values":
+                return {
+                    "type": "messages",
+                    "data": chunk,
+                    "namespace": namespace,
+                }
+
+            # Fallback for unknown modes
+            return {
+                "type": "unknown",
+                "data": chunk,
+                "namespace": namespace,
+            }
+        except Exception as e:
+            # If unpacking or formatting fails, return an error
+            logger.error(f"Failed to format stream item: {e}, item: {stream_item}")
+            return {
+                "type": "error",
+                "message": f"Failed to format stream item: {str(e)}",
+                "raw_item": str(stream_item),
+            }
 
     def __enter__(self):
         """Context manager entry."""
@@ -345,71 +377,13 @@ class CiriController:
         ):
             yield self._format_stream_item(stream_item, subgraphs, stream_mode)
 
-    def _format_stream_item(
-        self, stream_item: Any, subgraphs: bool, stream_mode: list[str] | str
-    ) -> dict:
-        """Format a stream item into a consistent output format."""
-        try:
-            # Handle different tuple structures based on subgraphs and stream_mode
-            if subgraphs and isinstance(stream_mode, list):
-                # 3-tuple: (namespace, mode, payload)
-                namespace, mode, chunk = stream_item
-            elif isinstance(stream_mode, list):
-                # 2-tuple: (mode, payload)
-                mode, chunk = stream_item
-                namespace = None
-            elif subgraphs:
-                # 2-tuple: (namespace, payload)
-                namespace, chunk = stream_item
-                mode = stream_mode
-            else:
-                # Just payload
-                chunk = stream_item
-                mode = stream_mode
-                namespace = None
-
-            if mode == "updates":
-                if chunk is not None and "__interrupt__" in chunk:
-                    return {
-                        "type": "interrupt",
-                        "data": chunk["__interrupt__"],
-                        "namespace": namespace,
-                    }
-                else:
-                    return {
-                        "type": "update",
-                        "data": chunk,
-                        "namespace": namespace,
-                    }
-            elif mode == "values":
-                return {
-                    "type": "messages",
-                    "data": chunk,
-                    "namespace": namespace,
-                }
-
-            # Fallback for unknown modes
-            return {
-                "type": "unknown",
-                "data": chunk,
-                "namespace": namespace,
-            }
-        except Exception as e:
-            # If unpacking or formatting fails, return an error
-            logger.error(f"Failed to format stream item: {e}, item: {stream_item}")
-            return {
-                "type": "error",
-                "message": f"Failed to format stream item: {str(e)}",
-                "raw_item": str(stream_item),
-            }
-
     def invoke(
         self,
         input: MessagesState | ResumeCommand | None,
         config: RunnableConfig | None = None,
         *,
         context: Any = None,
-    ) -> Any:
+    ) -> dict:
         """Invoke the compiled Ciri agent synchronously.
 
         Args:
@@ -460,3 +434,29 @@ class CiriController:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"Fetched Snapshot: {snapshot}")
             yield snapshot
+
+    def list_threads(self) -> List[dict]:
+        """List all managed threads."""
+        self._conn.row_factory = sqlite3.Row
+        cursor = self._conn.execute("SELECT * FROM threads ORDER BY updated_at DESC")
+        return [dict(row) for row in cursor.fetchall()]
+
+    def create_thread(self, thread_id: str, title: Optional[str] = None) -> None:
+        """Create a new thread entry."""
+        if not title:
+            title = f"Thread {thread_id[:8]}"
+        self._conn.execute(
+            "INSERT OR IGNORE INTO threads (id, title) VALUES (?, ?)",
+            (thread_id, title),
+        )
+
+    def update_thread_title(self, thread_id: str, title: str) -> None:
+        """Update the title of a thread."""
+        self._conn.execute(
+            "UPDATE threads SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (title, thread_id),
+        )
+
+    def delete_thread(self, thread_id: str) -> None:
+        """Delete a thread and its entry."""
+        self._conn.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
