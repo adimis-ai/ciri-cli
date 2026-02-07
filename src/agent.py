@@ -49,6 +49,7 @@ from deepagents.middleware.filesystem import FilesystemState
 
 
 from .toolkit import (
+    TeamRuntimeMiddleware,
     build_web_surfer_tool,
     build_web_crawler_tool,
     follow_up_with_human,
@@ -840,6 +841,16 @@ class Ciri(BaseModel):
         middleware_stack.extend(
             [
                 middleware_builder.build_shell_tool_middleware(self.shell_tool_config),
+            ]
+        )
+
+        middleware_stack.extend(
+            [
+                TeamRuntimeMiddleware(
+                    backend=backend,
+                    root_dir=root_dir,
+                    shell_config=self.shell_tool_config,
+                ),
             ]
         )
 

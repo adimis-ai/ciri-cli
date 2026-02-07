@@ -55,7 +55,7 @@ class Team(BaseModel):
     )
 
 
-class TeamRuntime(AgentMiddleware):
+class TeamRuntimeMiddleware(AgentMiddleware):
     def __init__(
         self,
         root_dir: str,
