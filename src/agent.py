@@ -17,11 +17,11 @@ from langgraph.cache.base import BaseCache
 from crawl4ai import ProxyConfig, BrowserConfig
 from deepagents.backends import FilesystemBackend
 from deepagents import SubAgent, CompiledSubAgent
+from pydantic import BaseModel, Field, ConfigDict
 from langchain.agents.middleware import AgentMiddleware
 from browser_use.llm.openrouter.chat import ChatOpenRouter
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain.chat_models import init_chat_model, BaseChatModel
-from pydantic import BaseModel, Field, ConfigDict, field_validator
 from browser_use.browser.profile import BrowserProfile, ProxySettings
 from typing import (
     Optional,
