@@ -3,7 +3,7 @@ import sqlite3
 import logging
 from dotenv import load_dotenv
 from dataclasses import dataclass
-from typing import Optional, Any, Iterator, List
+from typing import Optional, Any, Iterator, AsyncIterator, List
 
 
 from langgraph.graph import MessagesState
@@ -12,6 +12,7 @@ from langgraph.cache.memory import InMemoryCache
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command, RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
+from langchain_core.messages import AIMessageChunk
 
 from .agent import Ciri, ResumeCommand
 from .serializers import CiriJsonPlusSerializer
@@ -247,9 +248,26 @@ class CiriController:
                         "data": chunk,
                         "namespace": namespace,
                     }
+            elif mode == "messages":
+                # Token-by-token streaming from LangGraph messages mode
+                # chunk is a tuple: (message_chunk, metadata)
+                if isinstance(chunk, tuple) and len(chunk) == 2:
+                    message_chunk, metadata = chunk
+                    return {
+                        "type": "token",
+                        "data": message_chunk,
+                        "metadata": metadata,
+                        "namespace": namespace,
+                    }
+                return {
+                    "type": "token",
+                    "data": chunk,
+                    "metadata": {},
+                    "namespace": namespace,
+                }
             elif mode == "values":
                 return {
-                    "type": "messages",
+                    "type": "values",
                     "data": chunk,
                     "namespace": namespace,
                 }
@@ -366,7 +384,7 @@ class CiriController:
 
         # Default stream mode if not provided
         if stream_mode is None:
-            stream_mode = ["updates", "values"]
+            stream_mode = ["updates", "messages"]
 
         for stream_item in self.compiled_ciri.stream(
             input=input,
@@ -460,3 +478,87 @@ class CiriController:
     def delete_thread(self, thread_id: str) -> None:
         """Delete a thread and its entry."""
         self._conn.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
+
+    # ── Async variants for TUI (Textual) usage ──────────────────────────
+
+    async def astream(
+        self,
+        input: MessagesState | ResumeCommand | None,
+        config: RunnableConfig | None = None,
+        *,
+        context: Any = None,
+        subgraphs: bool = True,
+        stream_mode: list[str] | str | None = None,
+    ) -> AsyncIterator[dict]:
+        """Async stream responses from the compiled Ciri agent.
+
+        Yields formatted stream items with type, data, and optional namespace.
+        Token-by-token content arrives as type="token" items.
+        """
+        self._ensure_compiled()
+
+        input = self._prepare_input(input)
+
+        if stream_mode is None:
+            stream_mode = ["updates", "messages"]
+
+        async for stream_item in self.compiled_ciri.astream(
+            input=input,
+            config=config,
+            context=context,
+            subgraphs=subgraphs,
+            stream_mode=stream_mode,
+        ):
+            yield self._format_stream_item(stream_item, subgraphs, stream_mode)
+
+    async def ainvoke(
+        self,
+        input: MessagesState | ResumeCommand | None,
+        config: RunnableConfig | None = None,
+        *,
+        context: Any = None,
+    ) -> dict:
+        """Invoke the compiled Ciri agent asynchronously."""
+        self._ensure_compiled()
+        input = self._prepare_input(input)
+
+        return await self.compiled_ciri.ainvoke(
+            input=input,
+            config=config,
+            context=context,
+        )
+
+    async def ahistory(
+        self,
+        thread_id: str,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> AsyncIterator[Any]:
+        """Async get the history of states for a thread."""
+        self._ensure_compiled()
+
+        async for snapshot in self.compiled_ciri.aget_state_history(
+            limit=limit,
+            filter=filter,
+            before=before,
+            config={"configurable": {"thread_id": thread_id}},
+        ):
+            yield snapshot
+
+    async def alist_threads(self) -> List[dict]:
+        """List all managed threads (async-safe wrapper)."""
+        return self.list_threads()
+
+    async def acreate_thread(self, thread_id: str, title: Optional[str] = None) -> None:
+        """Create a new thread entry (async-safe wrapper)."""
+        self.create_thread(thread_id, title)
+
+    async def aupdate_thread_title(self, thread_id: str, title: str) -> None:
+        """Update the title of a thread (async-safe wrapper)."""
+        self.update_thread_title(thread_id, title)
+
+    async def adelete_thread(self, thread_id: str) -> None:
+        """Delete a thread and its entry (async-safe wrapper)."""
+        self.delete_thread(thread_id)
