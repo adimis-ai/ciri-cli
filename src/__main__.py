@@ -51,22 +51,32 @@ console = Console()
 
 
 def ensure_playwright_installed() -> None:
-    """Ensure Playwright browsers are installed for web crawling."""
+    """Ensure Playwright browsers are installed for web crawling.
+
+    Uses ``python -m playwright`` so it works on any OS regardless of
+    whether the ``playwright`` CLI script is on PATH.
+    """
     try:
+        # `playwright install` is idempotent — fast no-op if already present.
+        # Use sys.executable so it works on any OS even if the `playwright`
+        # CLI script isn't on PATH.
         result = subprocess.run(
-            ["playwright", "install", "chromium"],
+            [sys.executable, "-m", "playwright", "install", "chromium"],
             capture_output=True,
             timeout=300,
         )
         if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace").strip()
             console.print(
                 "[yellow]Warning: Playwright chromium installation failed. "
                 "Web crawling may not work properly.[/yellow]"
             )
+            if stderr:
+                console.print(f"[dim]{stderr[:200]}[/dim]")
     except FileNotFoundError:
         console.print(
-            "[yellow]Warning: Playwright CLI not found. "
-            "Web crawling may not work properly.[/yellow]"
+            "[yellow]Warning: Playwright package not found. "
+            "Install it with: pip install playwright[/yellow]"
         )
     except subprocess.TimeoutExpired:
         console.print(
