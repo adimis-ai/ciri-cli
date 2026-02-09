@@ -59,7 +59,12 @@ class CiriDatabase:
         row = cursor.fetchone()
         if row is None:
             return None
-        return {"id": row[0], "title": row[1], "created_at": row[2], "updated_at": row[3]}
+        return {
+            "id": row[0],
+            "title": row[1],
+            "created_at": row[2],
+            "updated_at": row[3],
+        }
 
     def rename_thread(self, thread_id: str, title: str) -> None:
         now = datetime.now(timezone.utc).isoformat()

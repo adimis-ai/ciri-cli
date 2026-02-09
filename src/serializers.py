@@ -63,6 +63,7 @@ class CiriJsonPlusSerializer(JsonPlusSerializer):
         else:
             return value
 
+
 class CiriSerializer:
     """Comprehensive serializer for Ciri types with proper JSON handling."""
 

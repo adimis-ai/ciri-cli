@@ -22,7 +22,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 
 # LangGraph / LangChain imports
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.memory import InMemoryStore
 from langchain_core.messages import (
     HumanMessage,
@@ -36,7 +36,6 @@ from langgraph.types import Command
 from .agent import Ciri, LLMConfig, ResumeCommand
 from .db import CiriDatabase
 from .utils import get_default_filesystem_root
-from .serializers import CiriJsonPlusSerializer
 
 console = Console()
 
@@ -44,6 +43,7 @@ console = Console()
 # ---------------------------------------------------------------------------
 # @ File/Folder & @skills: Autocomplete
 # ---------------------------------------------------------------------------
+
 
 class CiriCompleter(Completer):
     """Completer that supports:
@@ -115,11 +115,11 @@ class CiriCompleter(Completer):
         if at_idx > 0 and not text_before[at_idx - 1].isspace():
             return
 
-        after_at = text_before[at_idx + 1:]  # everything after @
+        after_at = text_before[at_idx + 1 :]  # everything after @
 
         # --- @skills:<partial> → skill name completions ---
         if after_at.lower().startswith(self.SKILLS_PREFIX):
-            partial = after_at[len(self.SKILLS_PREFIX):]
+            partial = after_at[len(self.SKILLS_PREFIX) :]
             partial_lower = partial.lower()
             start_position = -len(partial)
 
@@ -174,6 +174,7 @@ def get_user_input(completer: CiriCompleter) -> str:
 # Message Rendering Helpers
 # ---------------------------------------------------------------------------
 
+
 def render_tool_call(tool_call: dict) -> None:
     """Render a tool call with name and formatted arguments."""
     name = tool_call.get("name", "unknown")
@@ -185,7 +186,9 @@ def render_tool_call(tool_call: dict) -> None:
         console.print(f"\n[bold yellow]Tool Call:[/bold yellow] [cyan]{name}[/cyan]")
         console.print(Syntax(args_str, "json", theme="monokai", line_numbers=False))
     except (TypeError, ValueError):
-        console.print(f"\n[bold yellow]Tool Call:[/bold yellow] [cyan]{name}[/cyan]([dim]{args}[/dim])")
+        console.print(
+            f"\n[bold yellow]Tool Call:[/bold yellow] [cyan]{name}[/cyan]([dim]{args}[/dim])"
+        )
 
 
 def render_tool_message(message: ToolMessage) -> None:
@@ -209,6 +212,7 @@ def render_human_message(message) -> None:
 # ---------------------------------------------------------------------------
 # Human-in-the-Loop Interrupt Handling
 # ---------------------------------------------------------------------------
+
 
 async def handle_interrupts(graph, state, config, completer: CiriCompleter) -> None:
     """Handle all pending interrupts from the graph state."""
@@ -236,25 +240,31 @@ async def handle_interrupts(graph, state, config, completer: CiriCompleter) -> N
             await _handle_tool_approval(graph, val, config, completer)
         else:
             # Unknown interrupt type — show raw value and ask for generic response
-            console.print(Panel(
-                f"[bold yellow]Interrupt:[/bold yellow]\n{json.dumps(val, indent=2, default=str)}",
-                border_style="yellow",
-            ))
+            console.print(
+                Panel(
+                    f"[bold yellow]Interrupt:[/bold yellow]\n{json.dumps(val, indent=2, default=str)}",
+                    border_style="yellow",
+                )
+            )
             response = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: pt_prompt("Your response> ", completer=completer)
             )
             await run_graph(graph, Command(resume=response), config, completer)
 
 
-async def _handle_follow_up(graph, val: dict, config: dict, completer: CiriCompleter) -> None:
+async def _handle_follow_up(
+    graph, val: dict, config: dict, completer: CiriCompleter
+) -> None:
     """Handle a human_follow_up interrupt."""
     question = val.get("question", "")
     options = val.get("options")
 
-    console.print(Panel(
-        f"[bold yellow]Follow-up Question:[/bold yellow]\n{question}",
-        border_style="yellow",
-    ))
+    console.print(
+        Panel(
+            f"[bold yellow]Follow-up Question:[/bold yellow]\n{question}",
+            border_style="yellow",
+        )
+    )
 
     if options:
         # Show numbered options
@@ -264,7 +274,9 @@ async def _handle_follow_up(graph, val: dict, config: dict, completer: CiriCompl
 
         response = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: pt_prompt("Choose an option (number or text)> ", completer=completer),
+            lambda: pt_prompt(
+                "Choose an option (number or text)> ", completer=completer
+            ),
         )
         # If user typed a number, resolve to the option text
         try:
@@ -281,15 +293,19 @@ async def _handle_follow_up(graph, val: dict, config: dict, completer: CiriCompl
     await run_graph(graph, Command(resume=response), config, completer)
 
 
-async def _handle_tool_approval(graph, val: dict, config: dict, completer: CiriCompleter) -> None:
+async def _handle_tool_approval(
+    graph, val: dict, config: dict, completer: CiriCompleter
+) -> None:
     """Handle a tool approval interrupt (approve / reject / edit)."""
     action_requests = val.get("action_requests", [])
     review_configs = val.get("review_configs", [])
 
-    console.print(Panel(
-        "[bold yellow]Tool Execution Approval Required[/bold yellow]",
-        border_style="yellow",
-    ))
+    console.print(
+        Panel(
+            "[bold yellow]Tool Execution Approval Required[/bold yellow]",
+            border_style="yellow",
+        )
+    )
 
     # Display each action request
     for i, req in enumerate(action_requests):
@@ -298,7 +314,9 @@ async def _handle_tool_approval(graph, val: dict, config: dict, completer: CiriC
         console.print(f"\n  [bold]Action {i + 1}:[/bold] [cyan]{name}[/cyan]")
         try:
             args_str = json.dumps(args, indent=2, default=str)
-            console.print(Syntax(args_str, "json", theme="monokai", line_numbers=False, padding=1))
+            console.print(
+                Syntax(args_str, "json", theme="monokai", line_numbers=False, padding=1)
+            )
         except (TypeError, ValueError):
             console.print(f"  Arguments: {args}")
 
@@ -352,14 +370,18 @@ async def _handle_tool_approval(graph, val: dict, config: dict, completer: CiriC
                     new_args = args
             else:
                 new_args = args
-            decisions.append({
-                "type": "edit",
-                "edited_action": {"name": name, "args": new_args},
-            })
+            decisions.append(
+                {
+                    "type": "edit",
+                    "edited_action": {"name": name, "args": new_args},
+                }
+            )
         command = Command(resume={"decisions": decisions})
 
     else:
-        console.print(f"[red]Unknown decision '{decision}'. Defaulting to approve.[/red]")
+        console.print(
+            f"[red]Unknown decision '{decision}'. Defaulting to approve.[/red]"
+        )
         decisions = [{"type": "approve"} for _ in action_requests]
         command = Command(resume={"decisions": decisions})
 
@@ -369,6 +391,7 @@ async def _handle_tool_approval(graph, val: dict, config: dict, completer: CiriC
 # ---------------------------------------------------------------------------
 # Dual-Mode Streaming
 # ---------------------------------------------------------------------------
+
 
 async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = None):
     """Run the graph with dual stream mode and handle output + interrupts."""
@@ -398,7 +421,10 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
                             current_ai_message += content
                         elif isinstance(content, list):
                             for part in content:
-                                if isinstance(part, dict) and part.get("type") == "text":
+                                if (
+                                    isinstance(part, dict)
+                                    and part.get("type") == "text"
+                                ):
                                     text = part.get("text", "")
                                     console.print(text, end="")
                                     current_ai_message += text
@@ -407,7 +433,11 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
                     if hasattr(message, "tool_calls") and message.tool_calls:
                         for tool_call in message.tool_calls:
                             tc_id = tool_call.get("id")
-                            if tc_id and tc_id not in seen_tool_call_ids and tool_call.get("name"):
+                            if (
+                                tc_id
+                                and tc_id not in seen_tool_call_ids
+                                and tool_call.get("name")
+                            ):
                                 status.stop()
                                 render_tool_call(tool_call)
                                 seen_tool_call_ids.add(tc_id)
@@ -451,7 +481,10 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
 # Thread Management Commands
 # ---------------------------------------------------------------------------
 
-def handle_threads_command(db: CiriDatabase, current_thread_id: str, completer: CiriCompleter) -> Optional[str]:
+
+def handle_threads_command(
+    db: CiriDatabase, current_thread_id: str, completer: CiriCompleter
+) -> Optional[str]:
     """List all threads and optionally switch. Returns new thread_id or None."""
     threads = db.list_threads()
     if not threads:
@@ -525,17 +558,22 @@ def handle_delete_thread_command(db: CiriDatabase, current_thread_id: str) -> st
 # Main Interactive Loop
 # ---------------------------------------------------------------------------
 
+
 async def interactive_chat():
     """Main interactive chat loop for CIRI CLI."""
-    console.print(Panel(
-        "[bold cyan]CIRI[/bold cyan] - Desktop Personal AI Copilot\n[dim]Initializing...[/dim]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            "[bold cyan]CIRI[/bold cyan] - Desktop Personal AI Copilot\n[dim]Initializing...[/dim]",
+            border_style="cyan",
+        )
+    )
 
     # Ensure required environment variables are set
     if not os.getenv("OPENROUTER_API_KEY"):
         console.print("[yellow]OPENROUTER_API_KEY not found in environment.[/yellow]")
-        api_key = Prompt.ask("Please enter your [bold]OpenRouter API Key[/bold]", password=True)
+        api_key = Prompt.ask(
+            "Please enter your [bold]OpenRouter API Key[/bold]", password=True
+        )
         if api_key:
             os.environ["OPENROUTER_API_KEY"] = api_key
             console.print("[green]API Key set for this session.[/green]")
@@ -546,7 +584,9 @@ async def interactive_chat():
     model = os.getenv("CIRI_MODEL")
     if not model:
         console.print("[yellow]CIRI_MODEL not found in environment.[/yellow]")
-        model = Prompt.ask("Please enter the [bold]Model name[/bold]", default="openai/gpt-5-mini")
+        model = Prompt.ask(
+            "Please enter the [bold]Model name[/bold]", default="openai/gpt-5-mini"
+        )
         os.environ["CIRI_MODEL"] = model
         console.print(f"[green]Model set to {model} for this session.[/green]")
 
@@ -556,87 +596,96 @@ async def interactive_chat():
     llm_config = LLMConfig(model=model)
     ciri_app = Ciri(llm_config=llm_config)
 
-    # Checkpointer (encrypted SQLite) and Store
-    checkpointer = SqliteSaver(conn=db.connection, serde=CiriJsonPlusSerializer())
-    store = InMemoryStore()
+    async with AsyncSqliteSaver.from_conn_string(db.db_path) as checkpointer:
+        # Compile the agent graph
+        graph = ciri_app.compile(checkpointer=checkpointer)
 
-    # Compile the agent graph
-    graph = ciri_app.compile(store=store, checkpointer=checkpointer)
+        # Create initial thread
+        thread = db.create_thread()
+        current_thread_id = thread["id"]
+        config = {"configurable": {"thread_id": current_thread_id}}
+        is_first_message = True
 
-    # Create initial thread
-    thread = db.create_thread()
-    current_thread_id = thread["id"]
-    config = {"configurable": {"thread_id": current_thread_id}}
-    is_first_message = True
+        # Build file tree completer for @ autocomplete
+        root_dir = get_default_filesystem_root()
+        completer = CiriCompleter(root_dir)
 
-    # Build file tree completer for @ autocomplete
-    root_dir = get_default_filesystem_root()
-    completer = CiriCompleter(root_dir)
+        console.print(f"[green]Ready![/green] Root directory: [bold]{root_dir}[/bold]")
+        console.print(
+            "[dim]Tip: @ for file paths, @skills: for skills. Commands: /threads, /new-thread, /delete-thread[/dim]\n"
+        )
 
-    console.print(f"[green]Ready![/green] Root directory: [bold]{root_dir}[/bold]")
-    console.print("[dim]Tip: @ for file paths, @skills: for skills. Commands: /threads, /new-thread, /delete-thread[/dim]\n")
+        try:
+            while True:
+                try:
+                    # Re-scan skills before each prompt so newly generated skills appear
+                    completer._skills_cache = None
 
-    try:
-        while True:
-            try:
-                # Re-scan skills before each prompt so newly generated skills appear
-                completer._skills_cache = None
-
-                user_input = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: get_user_input(completer)
-                )
-
-                stripped = user_input.strip()
-
-                if stripped.lower() in ("exit", "quit", "bye"):
-                    console.print("[cyan]Goodbye![/cyan]")
-                    break
-
-                if not stripped:
-                    continue
-
-                # --- Thread commands ---
-                if stripped == "/threads":
-                    new_id = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: handle_threads_command(db, current_thread_id, completer)
+                    user_input = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: get_user_input(completer)
                     )
-                    if new_id:
-                        current_thread_id = new_id
+
+                    stripped = user_input.strip()
+
+                    if stripped.lower() in ("exit", "quit", "bye"):
+                        console.print("[cyan]Goodbye![/cyan]")
+                        break
+
+                    if not stripped:
+                        continue
+
+                    # --- Thread commands ---
+                    if stripped == "/threads":
+                        new_id = await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: handle_threads_command(
+                                db, current_thread_id, completer
+                            ),
+                        )
+                        if new_id:
+                            current_thread_id = new_id
+                            config = {"configurable": {"thread_id": current_thread_id}}
+                            is_first_message = False
+                        continue
+
+                    if stripped == "/new-thread":
+                        current_thread_id = handle_new_thread_command(db)
                         config = {"configurable": {"thread_id": current_thread_id}}
+                        is_first_message = True
+                        continue
+
+                    if stripped == "/delete-thread":
+                        current_thread_id = (
+                            await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: handle_delete_thread_command(
+                                    db, current_thread_id
+                                ),
+                            )
+                        )
+                        config = {"configurable": {"thread_id": current_thread_id}}
+                        is_first_message = True
+                        continue
+
+                    # --- Normal message ---
+                    # Auto-title thread from first message
+                    if is_first_message:
+                        title = stripped[:50] + ("..." if len(stripped) > 50 else "")
+                        db.rename_thread(current_thread_id, title)
                         is_first_message = False
-                    continue
 
-                if stripped == "/new-thread":
-                    current_thread_id = handle_new_thread_command(db)
-                    config = {"configurable": {"thread_id": current_thread_id}}
-                    is_first_message = True
-                    continue
+                    db.touch_thread(current_thread_id)
+                    inputs = {"messages": [HumanMessage(content=user_input)]}
+                    await run_graph(graph, inputs, config, completer)
 
-                if stripped == "/delete-thread":
-                    current_thread_id = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: handle_delete_thread_command(db, current_thread_id)
+                except KeyboardInterrupt:
+                    console.print(
+                        "\n[yellow]Interrupted by user. Type 'exit' to quit.[/yellow]"
                     )
-                    config = {"configurable": {"thread_id": current_thread_id}}
-                    is_first_message = True
-                    continue
-
-                # --- Normal message ---
-                # Auto-title thread from first message
-                if is_first_message:
-                    title = stripped[:50] + ("..." if len(stripped) > 50 else "")
-                    db.rename_thread(current_thread_id, title)
-                    is_first_message = False
-
-                db.touch_thread(current_thread_id)
-                inputs = {"messages": [HumanMessage(content=user_input)]}
-                await run_graph(graph, inputs, config, completer)
-
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Interrupted by user. Type 'exit' to quit.[/yellow]")
-            except Exception as e:
-                console.print(f"[red]Error: {e}[/red]")
-    finally:
-        db.close()
+                except Exception as e:
+                    console.print(f"[red]Error: {e}[/red]")
+        finally:
+            db.close()
 
 
 def main():

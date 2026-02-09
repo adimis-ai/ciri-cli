@@ -905,12 +905,12 @@ class Ciri(BaseModel):
 
     def compile(
         self,
-        store: BaseStore,
         checkpointer: Checkpointer,
         filesystem_root_dir: Optional[Union[str, Path]] = None,
         *,
         debug: bool = False,
         cache: Optional[BaseCache] = None,
+        store: Optional[BaseStore] = None,
         context_schema: Optional[Any] = None,
         tools: Optional[List[BaseTool]] = None,
         response_format: Optional[Type[BaseModel]] = None,

@@ -206,9 +206,7 @@ class SkillGeneratorMiddleware(AgentMiddleware):
         for middleware in middlewares:
             if hasattr(middleware, "tools"):
                 for tool in getattr(middleware, "tools", []):
-                    internal_tools = [
-                        t for t in internal_tools if t.name != tool.name
-                    ]
+                    internal_tools = [t for t in internal_tools if t.name != tool.name]
 
         return create_agent(
             name="skill_generator",
