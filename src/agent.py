@@ -18,7 +18,7 @@ from crawl4ai import ProxyConfig, BrowserConfig
 from deepagents.backends import FilesystemBackend
 from deepagents import SubAgent, CompiledSubAgent
 from pydantic import BaseModel, Field, ConfigDict
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, ToolRetryMiddleware
 from browser_use.llm.openrouter.chat import ChatOpenRouter
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain.chat_models import init_chat_model, BaseChatModel
@@ -852,6 +852,15 @@ class Ciri(BaseModel):
 
         middleware_stack.extend(
             [
+                ToolRetryMiddleware(
+                    max_retries=2,           # 2 retries after initial attempt
+                    retry_on=(Exception,),   # Retry on all exceptions
+                    on_failure="continue",   # Return error message to LLM on final failure
+                    backoff_factor=2.0,      # Exponential backoff multiplier
+                    initial_delay=1.0,       # 1 second initial delay
+                    max_delay=10.0,          # Cap at 10 seconds
+                    jitter=True,             # Add ±25% jitter
+                ),
                 middleware_builder.build_shell_tool_middleware(self.shell_tool_config),
             ]
         )

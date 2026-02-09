@@ -4,7 +4,8 @@ import asyncio
 import sys
 import uuid
 from pathlib import Path
-from typing import Optional, List, Any, Dict, Union
+from typing import Optional, List, Any, Dict, Union, Iterable
+import httpx
 
 # Third-party imports
 from rich.console import Console
@@ -160,13 +161,48 @@ class CiriCompleter(Completer):
                 )
 
 
-def get_user_input(completer: CiriCompleter) -> str:
-    """Get user input with @ file and @skills: autocomplete via prompt_toolkit."""
+class ModelCompleter(Completer):
+    """Completer for OpenRouter models."""
+
+    def __init__(self, models: List[str]):
+        self.models = models
+
+    def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
+        text = document.text_before_cursor.lstrip()
+        for model in self.models:
+            if model.startswith(text):
+                yield Completion(model, start_position=-len(text))
+
+
+async def fetch_openrouter_models() -> List[str]:
+    """Fetch available models from OpenRouter."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return []
+    
+    url = "https://openrouter.ai/api/v1/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                return [m["id"] for m in data.get("data", [])]
+    except Exception as e:
+        console.print(f"[dim red]Failed to fetch OpenRouter models: {e}[/dim red]")
+    
+    return []
+
+
+def get_user_input(completer: Completer, prompt_text: str = "You> ", default_val: str = "") -> str:
+    """Get user input with autocomplete via prompt_toolkit."""
     try:
         return pt_prompt(
-            "You> ",
+            prompt_text,
             completer=completer,
-            complete_while_typing=False,  # only complete on Tab
+            complete_while_typing=True,
+            default=default_val,
         )
     except (EOFError, KeyboardInterrupt):
         raise KeyboardInterrupt
@@ -613,10 +649,12 @@ async def interactive_chat():
             return
 
     model = os.getenv("CIRI_MODEL")
+    available_models = await fetch_openrouter_models()
+    model_completer = ModelCompleter(available_models)
+
     if not model:
-        console.print("[yellow]CIRI_MODEL not found in environment.[/yellow]")
-        model = Prompt.ask(
-            "Please enter the [bold]Model name[/bold]", default="openai/gpt-5-mini"
+        model = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: get_user_input(model_completer, "Select LLM Model (Tab for options)> ", "openai/gpt-5-mini")
         )
         os.environ["CIRI_MODEL"] = model
         console.print(f"[green]Model set to {model} for this session.[/green]")
@@ -697,6 +735,24 @@ async def interactive_chat():
                         )
                         config = {"configurable": {"thread_id": current_thread_id}}
                         is_first_message = True
+                        continue
+
+                    if stripped.startswith("/model"):
+                        parts = stripped.split(maxsplit=1)
+                        if len(parts) > 1:
+                            new_model = parts[1]
+                        else:
+                            new_model = await asyncio.get_event_loop().run_in_executor(
+                                None, lambda: get_user_input(model_completer, "New model> ")
+                            )
+                        
+                        if new_model:
+                            os.environ["CIRI_MODEL"] = new_model
+                            # Re-initialize agent with new model
+                            llm_config = LLMConfig(model=new_model)
+                            ciri_app = Ciri(llm_config=llm_config)
+                            graph = ciri_app.compile(checkpointer=checkpointer)
+                            console.print(f"[green]Model switched to {new_model}[/green]")
                         continue
 
                     # --- Normal message ---

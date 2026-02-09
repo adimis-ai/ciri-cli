@@ -34,47 +34,151 @@ class CiriJsonPlusSerializer(JsonPlusSerializer):
     def __init__(self, **kwargs):
         super().__init__(pickle_fallback=True, **kwargs)
 
+    def _needs_precleaning(self, obj) -> bool:
+        """Check if object type likely contains unpickleable items."""
+        if obj is None or isinstance(obj, (str, int, float, bool, bytes)):
+            return False
+        
+        type_name = type(obj).__name__
+        
+        # LangGraph types often contain locks
+        if type_name in ("Send", "Command", "StateSnapshot"):
+            return True
+        
+        # Check for module hints
+        module = getattr(type(obj), '__module__', '')
+        if module.startswith(('langgraph', '_thread', 'threading')):
+            return True
+        
+        # Dicts and lists might contain locks
+        if isinstance(obj, (dict, list)):
+            return True
+        
+        # Objects with __dict__ or __slots__ may have lock attributes
+        if hasattr(obj, '__dict__') or hasattr(obj, '__slots__'):
+            return True
+        
+        return False
+
     def dumps_typed(self, obj):
+        # Pre-clean objects that likely contain unpickleable items
+        if self._needs_precleaning(obj):
+            obj = self._strip_unpickleable(obj)
+        
         try:
             return super().dumps_typed(obj)
-        except (TypeError, pickle.PicklingError) as e:
+        except (TypeError, pickle.PicklingError, AttributeError) as e:
+            # Fallback for any remaining edge cases
             logger.warning(
                 "Pickle fallback failed for %s: %s — retrying after cleanup",
                 type(obj).__name__, e,
             )
             cleaned = self._strip_unpickleable(obj)
-            # Retry with cleaned object (pickle_fallback still active)
             return super().dumps_typed(cleaned)
 
     @staticmethod
     def _strip_unpickleable(obj, _seen=None):
-        """Recursively replace unpickleable values with their string repr."""
+        """Recursively replace unpickleable values with their string repr.
+        
+        Proactively strips known unpickleable types (locks, threads, etc.)
+        and recursively processes object attributes before attempting pickle test.
+        """
+        import threading
+        
         if _seen is None:
             _seen = set()
-        obj_id = id(obj)
-        if obj_id in _seen:
-            return None
-        _seen.add(obj_id)
-
+        
+        # Handle None and primitives early
         if obj is None or isinstance(obj, (str, int, float, bool, bytes)):
             return obj
-        elif isinstance(obj, dict):
+        
+        # Avoid circular references
+        try:
+            obj_id = id(obj)
+            if obj_id in _seen:
+                return None
+            _seen.add(obj_id)
+        except TypeError:
+            # Some objects don't support id()
+            pass
+        
+        # Handle known unpickleable types directly
+        type_name = type(obj).__name__
+        module_name = getattr(type(obj), '__module__', '')
+        
+        # Direct exclusion for thread-related types
+        if type_name in ('lock', 'Lock', 'RLock', '_thread.lock', '_RLock') or \
+           'lock' in type_name.lower() or \
+           module_name.startswith('_thread') or \
+           isinstance(obj, type(threading.Lock())):
+            return f"<{type_name}>"
+        
+        # Handle dicts
+        if isinstance(obj, dict):
             return {
                 k: CiriJsonPlusSerializer._strip_unpickleable(v, _seen)
                 for k, v in obj.items()
+                if not (isinstance(k, str) and k.startswith('_lock'))  # Skip lock keys
             }
-        elif isinstance(obj, (list, tuple)):
+        
+        # Handle lists and tuples
+        if isinstance(obj, (list, tuple)):
             items = [
                 CiriJsonPlusSerializer._strip_unpickleable(i, _seen)
                 for i in obj
             ]
             return tuple(items) if isinstance(obj, tuple) else items
-        else:
-            try:
-                pickle.dumps(obj)
-                return obj
-            except (TypeError, pickle.PicklingError):
-                return str(obj)
+        
+        # Handle sets
+        if isinstance(obj, (set, frozenset)):
+            items = [
+                CiriJsonPlusSerializer._strip_unpickleable(i, _seen)
+                for i in obj
+            ]
+            return frozenset(items) if isinstance(obj, frozenset) else set(items)
+        
+        # Handle LangGraph Send objects specially - extract only safe attributes
+        if type_name == "Send" and hasattr(obj, "node") and hasattr(obj, "arg"):
+            return {
+                "_type": "Send",
+                "node": CiriJsonPlusSerializer._strip_unpickleable(getattr(obj, "node", None), _seen),
+                "arg": CiriJsonPlusSerializer._strip_unpickleable(getattr(obj, "arg", None), _seen),
+            }
+        
+        # Handle objects with __dict__ or __slots__ - recursively clean their attributes
+        cleaned_dict = {}
+        has_internal_data = False
+        
+        if hasattr(obj, "__dict__"):
+            has_internal_data = True
+            for k, v in obj.__dict__.items():
+                # Skip private lock-like attributes
+                if isinstance(k, str) and ('lock' in k.lower() or k.startswith('_')):
+                    continue
+                cleaned_dict[k] = CiriJsonPlusSerializer._strip_unpickleable(v, _seen)
+        
+        if hasattr(obj, "__slots__"):
+            has_internal_data = True
+            for slot in obj.__slots__:
+                if hasattr(obj, slot):
+                    # Skip lock-like slots
+                    if 'lock' in slot.lower():
+                        continue
+                    cleaned_dict[slot] = CiriJsonPlusSerializer._strip_unpickleable(
+                        getattr(obj, slot), _seen
+                    )
+        
+        # If we extracted internal data, try to return a clean dict representation
+        if has_internal_data and cleaned_dict:
+            cleaned_dict["_type"] = type_name
+            return cleaned_dict
+        
+        # Final fallback: try to pickle; if it fails, return string representation
+        try:
+            pickle.dumps(obj)
+            return obj
+        except (TypeError, pickle.PicklingError, AttributeError):
+            return str(obj)
 
 
 class CiriSerializer:
