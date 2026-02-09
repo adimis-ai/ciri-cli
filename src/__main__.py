@@ -36,10 +36,15 @@ from langgraph.types import Command
 import aiosqlite
 
 # Local imports
-from .agent import Ciri, LLMConfig, ResumeCommand
+from .agent import Ciri, LLMConfig, WebSurferBrowserConfig, ResumeCommand
 from .db import CiriDatabase
 from .serializers import CiriJsonPlusSerializer
-from .utils import get_default_filesystem_root, get_app_data_dir
+from .utils import (
+    get_default_filesystem_root,
+    get_app_data_dir,
+    detect_browser_profiles,
+    copy_browser_profile,
+)
 from dotenv import set_key
 
 console = Console()
@@ -87,6 +92,122 @@ def ensure_playwright_installed() -> None:
         console.print(
             f"[yellow]Warning: Failed to ensure Playwright browsers: {e}[/yellow]"
         )
+
+
+def _setup_browser_profile() -> Optional[WebSurferBrowserConfig]:
+    """Detect browser profiles and let the user select one.
+
+    If a previous choice was persisted in CIRI_BROWSER_PROFILE, reuse it.
+    Returns a WebSurferBrowserConfig with the copied profile, or None to
+    use the default bundled Chromium.
+    """
+    import json as _json
+
+    # Check for a persisted choice
+    saved_raw = os.getenv("CIRI_BROWSER_PROFILE")
+    if saved_raw:
+        try:
+            saved = _json.loads(saved_raw)
+            source_dir = Path(saved["user_data_dir"])
+            profile_dir = saved["profile_directory"]
+            # Validate the source still exists
+            if (source_dir / profile_dir / "Preferences").is_file():
+                with console.status("[bold cyan]Preparing browser profile...[/bold cyan]"):
+                    copied = copy_browser_profile(source_dir, profile_dir)
+                console.print(
+                    f"[green]\u2713 Browser profile ready: {saved.get('display_name', profile_dir)} "
+                    f"({saved.get('browser', 'chrome')})[/green]"
+                )
+                return WebSurferBrowserConfig(
+                    user_data_dir=str(copied),
+                    profile_directory=profile_dir,
+                )
+            else:
+                console.print(
+                    "[yellow]Previously saved browser profile no longer exists, re-detecting...[/yellow]"
+                )
+        except (KeyError, _json.JSONDecodeError, TypeError):
+            pass
+
+    # Detect available profiles
+    with console.status("[bold cyan]Detecting browser profiles...[/bold cyan]"):
+        profiles = detect_browser_profiles()
+
+    if not profiles:
+        console.print("[dim]No browser profiles detected, using clean browser[/dim]")
+        return None
+
+    selected = None
+
+    if len(profiles) == 1:
+        p = profiles[0]
+        console.print(
+            f"[cyan]Browser profile found:[/cyan] {p['display_name']} ({p['browser']})"
+        )
+        use_it = Confirm.ask("Use this browser profile for web automation?", default=True)
+        if use_it:
+            selected = p
+    else:
+        # Multiple profiles — show numbered table
+        table = Table(title="Available Browser Profiles", show_lines=False)
+        table.add_column("#", style="bold", width=3)
+        table.add_column("Browser", style="cyan")
+        table.add_column("Profile", style="green")
+        table.add_column("Directory", style="dim")
+
+        table.add_row("0", "", "No profile (clean browser)", "")
+        for i, p in enumerate(profiles, 1):
+            table.add_row(str(i), p["browser"], p["display_name"], p["profile_directory"])
+
+        console.print(table)
+
+        while True:
+            choice = Prompt.ask(
+                "Select a browser profile",
+                default="1",
+            )
+            try:
+                idx = int(choice)
+            except ValueError:
+                console.print("[red]Please enter a valid number.[/red]")
+                continue
+
+            if idx == 0:
+                break
+            if 1 <= idx <= len(profiles):
+                selected = profiles[idx - 1]
+                break
+            console.print(f"[red]Please enter a number between 0 and {len(profiles)}.[/red]")
+
+    if selected is None:
+        console.print("[dim]Using clean browser (no profile)[/dim]")
+        return None
+
+    # Copy the selected profile
+    with console.status("[bold cyan]Preparing browser profile...[/bold cyan]"):
+        copied = copy_browser_profile(
+            Path(selected["user_data_dir"]),
+            selected["profile_directory"],
+        )
+
+    # Persist the choice
+    global_env = get_app_data_dir() / ".env"
+    persisted = _json.dumps({
+        "browser": selected["browser"],
+        "user_data_dir": str(selected["user_data_dir"]),
+        "profile_directory": selected["profile_directory"],
+        "display_name": selected["display_name"],
+    })
+    set_key(str(global_env), "CIRI_BROWSER_PROFILE", persisted)
+
+    console.print(
+        f"[green]\u2713 Browser profile ready: {selected['display_name']} ({selected['browser']})[/green]"
+    )
+
+    return WebSurferBrowserConfig(
+        user_data_dir=str(copied),
+        profile_directory=selected["profile_directory"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -279,15 +400,64 @@ def render_tool_call(tool_call: dict) -> None:
         )
 
 
+def render_todos_list(todos: list) -> None:
+    """Render a nicely formatted todos list."""
+    if not todos:
+        console.print("[dim]No todos[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold cyan", padding=(0, 1))
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Status", width=12)
+    table.add_column("Content")
+
+    for i, todo in enumerate(todos, 1):
+        status = todo.get("status", "pending")
+        content = todo.get("content", "")
+
+        # Style status
+        if status == "completed":
+            status_styled = "[green]✓ completed[/green]"
+        elif status == "in_progress":
+            status_styled = "[yellow]⟳ in_progress[/yellow]"
+        else:
+            status_styled = "[dim]○ pending[/dim]"
+
+        table.add_row(str(i), status_styled, content)
+
+    console.print(table)
+
+
 def render_tool_message(message: ToolMessage) -> None:
     """Render a tool response message."""
     content = str(message.content)
     tool_name = getattr(message, "name", None) or message.tool_call_id or "tool"
+
+    console.print(f"\n[bold magenta]Tool Response ({tool_name}):[/bold magenta]")
+
+    # Special handling for write_todos tool
+    if tool_name == "write_todos":
+        try:
+            # Try to parse the response to extract todos
+            # Response format: "Updated todo list to [...]"
+            if "Updated todo list to [" in content:
+                # Extract the JSON array part
+                start_idx = content.find("[")
+                end_idx = content.rfind("]") + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    todos_json = content[start_idx:end_idx]
+                    todos = json.loads(todos_json)
+                    if isinstance(todos, list):
+                        render_todos_list(todos)
+                        return
+        except (json.JSONDecodeError, ValueError, IndexError):
+            pass
+
+    # Default rendering for other tools
     if len(content) > 300:
         content_preview = content[:300] + "..."
     else:
         content_preview = content
-    console.print(f"\n[bold magenta]Tool Response ({tool_name}):[/bold magenta]")
     console.print(f"[dim]{content_preview}[/dim]")
 
 
@@ -793,10 +963,13 @@ async def interactive_chat():
         )
     )
 
-    # Ensure Playwright is installed for web crawling
-    ensure_playwright_installed()
+    # Step 1: Ensure Playwright is installed for web crawling
+    with console.status("[bold cyan]⏳ Checking Playwright browsers...[/bold cyan]"):
+        ensure_playwright_installed()
+    console.print("[green]✓ Playwright ready[/green]")
 
-    # Ensure required environment variables are set
+    # Step 2: Ensure required environment variables are set
+    console.print("[bold cyan]⏳ Checking API configuration...[/bold cyan]")
     if not os.getenv("OPENROUTER_API_KEY"):
         console.print("[yellow]OPENROUTER_API_KEY not found in environment.[/yellow]")
         api_key = Prompt.ask(
@@ -807,13 +980,17 @@ async def interactive_chat():
             # Save to global .env
             global_env = get_app_data_dir() / ".env"
             set_key(str(global_env), "OPENROUTER_API_KEY", api_key)
-            console.print("[green]API Key set and saved globally.[/green]")
+            console.print("[green]✓ API Key configured[/green]")
         else:
             console.print("[red]API Key is required to continue. Exiting.[/red]")
             return
+    else:
+        console.print("[green]✓ API Key found[/green]")
 
+    # Step 3: Select or load model
     model = os.getenv("CIRI_MODEL")
-    available_models = await fetch_openrouter_models()
+    with console.status("[bold cyan]⏳ Fetching available models...[/bold cyan]"):
+        available_models = await fetch_openrouter_models()
     model_completer = ModelCompleter(available_models)
 
     if not model:
@@ -826,30 +1003,43 @@ async def interactive_chat():
             ),
         )
         os.environ["CIRI_MODEL"] = model
-        console.print(f"[green]Model set to {model} for this session.[/green]")
+    console.print(f"[green]✓ Model selected: {model}[/green]")
 
-    # Initialize encrypted database
-    db = CiriDatabase()
+    # Step 4: Initialize database
+    with console.status("[bold cyan]⏳ Initializing database...[/bold cyan]"):
+        db = CiriDatabase()
+    console.print("[green]✓ Database ready[/green]")
 
-    llm_config = LLMConfig(model=model)
-    ciri_app = Ciri(llm_config=llm_config)
+    # Step 4.5: Detect and select browser profile
+    web_surfer_config = _setup_browser_profile()
+
+    # Step 5: Initialize LLM & agent
+    with console.status("[bold cyan]⏳ Initializing LLM agent...[/bold cyan]"):
+        llm_config = LLMConfig(model=model)
+        ciri_app = Ciri(
+            llm_config=llm_config,
+            web_surfer_browser_config=web_surfer_config,
+        )
 
     async with aiosqlite.connect(db.db_path) as conn:
-        checkpointer = AsyncSqliteSaver(conn, serde=CiriJsonPlusSerializer())
-        # Compile the agent graph
-        graph = ciri_app.compile(checkpointer=checkpointer)
+        with console.status("[bold cyan]⏳ Compiling agent graph...[/bold cyan]"):
+            checkpointer = AsyncSqliteSaver(conn, serde=CiriJsonPlusSerializer())
+            # Compile the agent graph
+            graph = ciri_app.compile(checkpointer=checkpointer)
+        console.print("[green]✓ Agent ready[/green]")
 
-        # Create initial thread
-        thread = db.create_thread()
-        current_thread_id = thread["id"]
-        config = {"configurable": {"thread_id": current_thread_id}}
-        is_first_message = True
+        # Step 6: Create initial thread and build completer
+        with console.status("[bold cyan]⏳ Setting up workspace...[/bold cyan]"):
+            thread = db.create_thread()
+            current_thread_id = thread["id"]
+            config = {"configurable": {"thread_id": current_thread_id}}
+            is_first_message = True
 
-        # Build file tree completer for @ autocomplete
-        root_dir = get_default_filesystem_root()
-        completer = CiriCompleter(root_dir)
+            # Build file tree completer for @ autocomplete
+            root_dir = get_default_filesystem_root()
+            completer = CiriCompleter(root_dir)
 
-        console.print(f"[green]Ready![/green] Root directory: [bold]{root_dir}[/bold]")
+        console.print(f"\n[green bold]✅ Ready![/green bold] Root directory: [bold]{root_dir}[/bold]")
         console.print(
             "[dim]Tip: @ for file paths, @skills: for skills. Commands: /threads, /new-thread, /delete-thread[/dim]\n"
         )

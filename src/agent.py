@@ -240,6 +240,7 @@ class WebSurferBrowserConfig(BaseModel):
     executable_path: Optional[Union[str, Path]] = None
     headless: Optional[bool] = None
     user_data_dir: Optional[Union[str, Path]] = None
+    profile_directory: Optional[str] = None
     args: Optional[list[str]] = None
     downloads_path: Optional[Union[str, Path]] = None
 
