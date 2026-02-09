@@ -127,6 +127,16 @@ def _setup_browser_profile() -> Optional[WebSurferBrowserConfig]:
                     max_iframe_depth=2,  # Reduce iframe traversal depth
                     minimum_wait_page_load_time=1.0,  # Give pages more time to settle
                     wait_for_network_idle_page_load_time=2.0,  # Wait longer for network idle
+                    # Performance args to disable extensions and speed up automation
+                    args=[
+                        "--disable-extensions",
+                        "--disable-background-networking",
+                        "--disable-sync",
+                        "--disable-translate",
+                        "--disable-default-apps",
+                        "--no-first-run",
+                        "--disable-popup-blocking",
+                    ],
                 )
             else:
                 console.print(
@@ -219,6 +229,16 @@ def _setup_browser_profile() -> Optional[WebSurferBrowserConfig]:
         max_iframe_depth=2,  # Reduce iframe traversal depth
         minimum_wait_page_load_time=1.0,  # Give pages more time to settle
         wait_for_network_idle_page_load_time=2.0,  # Wait longer for network idle
+        # Performance args to disable extensions and speed up automation
+        args=[
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--disable-translate",
+            "--disable-default-apps",
+            "--no-first-run",
+            "--disable-popup-blocking",
+        ],
     )
 
 
