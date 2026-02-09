@@ -42,24 +42,31 @@ console = Console()
 
 
 # ---------------------------------------------------------------------------
-# @ File/Folder Autocomplete
+# @ File/Folder & @skills: Autocomplete
 # ---------------------------------------------------------------------------
 
-class FilePathCompleter(Completer):
-    """Completer that triggers on `@` and suggests files/folders from root_dir."""
+class CiriCompleter(Completer):
+    """Completer that supports:
+    - `@` followed by a partial path → file/folder autocomplete from root_dir
+    - `@skills:` followed by a partial name → skill name autocomplete from .ciri/skills/
+    """
+
+    SKILLS_PREFIX = "skills:"
 
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir.resolve()
-        self._cache: Optional[List[str]] = None
+        self._file_cache: Optional[List[str]] = None
+        self._skills_cache: Optional[List[str]] = None
 
-    def _scan(self) -> List[str]:
+    # --- File scanning ---
+
+    def _scan_files(self) -> List[str]:
         """Recursively scan root_dir and cache relative paths."""
-        if self._cache is not None:
-            return self._cache
+        if self._file_cache is not None:
+            return self._file_cache
         paths = []
         try:
             for p in sorted(self.root_dir.rglob("*")):
-                # Skip hidden dirs/files starting with .
                 parts = p.relative_to(self.root_dir).parts
                 if any(part.startswith(".") for part in parts):
                     continue
@@ -69,17 +76,37 @@ class FilePathCompleter(Completer):
                 paths.append(rel)
         except PermissionError:
             pass
-        self._cache = paths
-        return self._cache
+        self._file_cache = paths
+        return self._file_cache
+
+    # --- Skills scanning ---
+
+    def _scan_skills(self) -> List[str]:
+        """List available skill names from .ciri/skills/ directory."""
+        if self._skills_cache is not None:
+            return self._skills_cache
+        skills_dir = self.root_dir / ".ciri" / "skills"
+        skills: List[str] = []
+        if skills_dir.is_dir():
+            for d in sorted(skills_dir.iterdir()):
+                if d.is_dir() and (d / "SKILL.md").is_file():
+                    skills.append(d.name)
+        self._skills_cache = skills
+        return self._skills_cache
+
+    # --- Cache management ---
 
     def invalidate_cache(self):
-        """Clear the cached file tree so the next completion rescans."""
-        self._cache = None
+        """Clear all cached data so the next completion rescans."""
+        self._file_cache = None
+        self._skills_cache = None
+
+    # --- Completions ---
 
     def get_completions(self, document: Document, complete_event):
         text_before = document.text_before_cursor
 
-        # Find the last `@` that starts a file reference
+        # Find the last `@` that starts a reference
         at_idx = text_before.rfind("@")
         if at_idx == -1:
             return
@@ -88,24 +115,51 @@ class FilePathCompleter(Completer):
         if at_idx > 0 and not text_before[at_idx - 1].isspace():
             return
 
-        partial = text_before[at_idx + 1 :]  # text after @
+        after_at = text_before[at_idx + 1:]  # everything after @
+
+        # --- @skills:<partial> → skill name completions ---
+        if after_at.lower().startswith(self.SKILLS_PREFIX):
+            partial = after_at[len(self.SKILLS_PREFIX):]
+            partial_lower = partial.lower()
+            start_position = -len(partial)
+
+            for skill in self._scan_skills():
+                if skill.lower().startswith(partial_lower):
+                    yield Completion(
+                        skill,
+                        start_position=start_position,
+                        display=skill,
+                        display_meta="skill",
+                    )
+            return
+
+        # If user just typed "@" with no further text, also offer "skills:" as
+        # a completion option so they can discover the feature.
+        partial = after_at
         partial_lower = partial.lower()
-        # How many characters to replace (the partial after @)
         start_position = -len(partial)
 
-        for path in self._scan():
+        if self.SKILLS_PREFIX.startswith(partial_lower):
+            yield Completion(
+                self.SKILLS_PREFIX,
+                start_position=start_position,
+                display="skills:",
+                display_meta="select skill",
+            )
+
+        # --- @<partial> → file/folder completions ---
+        for path in self._scan_files():
             if path.lower().startswith(partial_lower):
-                display = path
                 yield Completion(
                     path,
                     start_position=start_position,
-                    display=display,
+                    display=path,
                     display_meta="dir" if path.endswith("/") else "file",
                 )
 
 
-def get_user_input(completer: FilePathCompleter) -> str:
-    """Get user input with @ autocomplete support via prompt_toolkit."""
+def get_user_input(completer: CiriCompleter) -> str:
+    """Get user input with @ file and @skills: autocomplete via prompt_toolkit."""
     try:
         return pt_prompt(
             "You> ",
@@ -156,7 +210,7 @@ def render_human_message(message) -> None:
 # Human-in-the-Loop Interrupt Handling
 # ---------------------------------------------------------------------------
 
-async def handle_interrupts(graph, state, config, completer: FilePathCompleter) -> None:
+async def handle_interrupts(graph, state, config, completer: CiriCompleter) -> None:
     """Handle all pending interrupts from the graph state."""
     snapshot = state.values
     interrupts = snapshot.get("__interrupt__", [])
@@ -192,7 +246,7 @@ async def handle_interrupts(graph, state, config, completer: FilePathCompleter) 
             await run_graph(graph, Command(resume=response), config, completer)
 
 
-async def _handle_follow_up(graph, val: dict, config: dict, completer: FilePathCompleter) -> None:
+async def _handle_follow_up(graph, val: dict, config: dict, completer: CiriCompleter) -> None:
     """Handle a human_follow_up interrupt."""
     question = val.get("question", "")
     options = val.get("options")
@@ -227,7 +281,7 @@ async def _handle_follow_up(graph, val: dict, config: dict, completer: FilePathC
     await run_graph(graph, Command(resume=response), config, completer)
 
 
-async def _handle_tool_approval(graph, val: dict, config: dict, completer: FilePathCompleter) -> None:
+async def _handle_tool_approval(graph, val: dict, config: dict, completer: CiriCompleter) -> None:
     """Handle a tool approval interrupt (approve / reject / edit)."""
     action_requests = val.get("action_requests", [])
     review_configs = val.get("review_configs", [])
@@ -316,7 +370,7 @@ async def _handle_tool_approval(graph, val: dict, config: dict, completer: FileP
 # Dual-Mode Streaming
 # ---------------------------------------------------------------------------
 
-async def run_graph(graph, inputs, config, completer: Optional[FilePathCompleter] = None):
+async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = None):
     """Run the graph with dual stream mode and handle output + interrupts."""
     current_ai_message = ""
     prefix_printed = False
@@ -389,7 +443,7 @@ async def run_graph(graph, inputs, config, completer: Optional[FilePathCompleter
             await handle_interrupts(graph, state, config, completer)
         else:
             # Fallback without completer (shouldn't normally happen)
-            _completer = FilePathCompleter(get_default_filesystem_root())
+            _completer = CiriCompleter(get_default_filesystem_root())
             await handle_interrupts(graph, state, config, _completer)
 
 
@@ -397,7 +451,7 @@ async def run_graph(graph, inputs, config, completer: Optional[FilePathCompleter
 # Thread Management Commands
 # ---------------------------------------------------------------------------
 
-def handle_threads_command(db: CiriDatabase, current_thread_id: str, completer: FilePathCompleter) -> Optional[str]:
+def handle_threads_command(db: CiriDatabase, current_thread_id: str, completer: CiriCompleter) -> Optional[str]:
     """List all threads and optionally switch. Returns new thread_id or None."""
     threads = db.list_threads()
     if not threads:
@@ -517,14 +571,17 @@ async def interactive_chat():
 
     # Build file tree completer for @ autocomplete
     root_dir = get_default_filesystem_root()
-    completer = FilePathCompleter(root_dir)
+    completer = CiriCompleter(root_dir)
 
     console.print(f"[green]Ready![/green] Root directory: [bold]{root_dir}[/bold]")
-    console.print("[dim]Tip: Type @ for file paths. Commands: /threads, /new-thread, /delete-thread[/dim]\n")
+    console.print("[dim]Tip: @ for file paths, @skills: for skills. Commands: /threads, /new-thread, /delete-thread[/dim]\n")
 
     try:
         while True:
             try:
+                # Re-scan skills before each prompt so newly generated skills appear
+                completer._skills_cache = None
+
                 user_input = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: get_user_input(completer)
                 )

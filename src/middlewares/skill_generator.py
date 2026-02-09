@@ -47,16 +47,18 @@ class SkillGeneratorArgs(BaseModel):
     )
 
 
-SKILL_GENERATOR_SYSTEM_PROMPT = """You are an expert AI Skill Designer. Your job is to research a topic thoroughly and produce a high-quality SKILL.md file that follows the Agent Skills specification.
+SKILL_GENERATOR_SYSTEM_PROMPT = """You are an expert AI Skill Designer. Your job is to research a topic thoroughly and produce a high-quality SKILL.md file that follows the Agent Skills specification. You can both create new skills and update existing ones.
 
 ## Your Workflow
 
 1. **Understand the Request**: Analyze the skill name, description, and any additional context provided.
-2. **Check for Duplicates**: Use the filesystem tools to check if a skill with this name already exists in the `/.ciri/skills/` directory. If it does, report that it already exists and stop.
+2. **Check Existing Content**: If an existing SKILL.md is provided, read it carefully and understand its current structure, content, and coverage.
 3. **Research the Topic**: Use your available search and crawling tools to gather comprehensive, up-to-date information about the skill's domain. Combine web search results with your internal knowledge.
-4. **Design the Skill**: Structure the skill with clear workflows, best practices, examples, and actionable instructions.
-5. **Write the SKILL.md**: Create the skill directory and write the SKILL.md file in the correct format.
-6. **Verify**: Read back the created file to confirm it was written correctly.
+4. **Design / Update the Skill**:
+   - For **new skills**: Structure the skill with clear workflows, best practices, examples, and actionable instructions.
+   - For **existing skills**: Preserve what's already good, improve weak sections, add missing information, update outdated content, and incorporate the new description/context. Do NOT discard existing valuable content — merge and enhance.
+5. **Write the SKILL.md**: Create the skill directory (if needed) and write the SKILL.md file in the correct format.
+6. **Verify**: Read back the created/updated file to confirm it was written correctly.
 
 ## SKILL.md Format
 
@@ -109,7 +111,7 @@ license: MIT
 - The SKILL.md must be comprehensive enough for an AI agent to follow without prior domain knowledge.
 - Include real, actionable workflows - not just theoretical descriptions.
 - Write the skill to `/.ciri/skills/<skill-name>/SKILL.md`.
-- If the skill already exists in `/.ciri/skills/`, DO NOT overwrite it. Report that it exists and stop.
+- If the skill already exists and its current content is provided, update it by merging new research with the existing content. Preserve valuable existing sections while improving and extending them.
 
 ## Research Guidelines
 
@@ -154,6 +156,20 @@ class SkillGeneratorMiddleware(AgentMiddleware):
             if os.path.isdir(os.path.join(skills_dir, d))
             and os.path.isfile(os.path.join(skills_dir, d, "SKILL.md"))
         ]
+
+    def _read_existing_skill(self, skill_name: str) -> Optional[str]:
+        """Read the full content of an existing SKILL.md file."""
+        skill_path = os.path.join(
+            self.root_dir, ".ciri", "skills", skill_name, "SKILL.md"
+        )
+        if not os.path.isfile(skill_path):
+            return None
+        try:
+            with open(skill_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except (OSError, IOError) as e:
+            logger.warning("Failed to read existing skill %s: %s", skill_name, e)
+            return None
 
     def _setup_middleware(self, request: ModelRequest):
         """Set up middleware stack for the internal skill generator agent."""
@@ -203,36 +219,66 @@ class SkillGeneratorMiddleware(AgentMiddleware):
             system_prompt=SKILL_GENERATOR_SYSTEM_PROMPT,
         )
 
-    def _build_generation_prompt(self, args: SkillGeneratorArgs) -> str:
+    def _build_generation_prompt(
+        self, args: SkillGeneratorArgs, existing_content: Optional[str] = None
+    ) -> str:
         """Build the prompt for the skill generator agent."""
         existing_skills = self._get_existing_skills()
         existing_list = (
             ", ".join(f"`{s}`" for s in existing_skills) if existing_skills else "none"
         )
 
-        prompt = (
-            f"Generate a new skill with the following details:\n\n"
-            f"**Skill Name:** `{args.skill_name}`\n"
-            f"**Description:** {args.skill_description}\n"
-        )
+        is_update = existing_content is not None
+
+        if is_update:
+            prompt = (
+                f"Update the existing skill with the following details:\n\n"
+                f"**Skill Name:** `{args.skill_name}`\n"
+                f"**Updated Description:** {args.skill_description}\n"
+            )
+        else:
+            prompt = (
+                f"Generate a new skill with the following details:\n\n"
+                f"**Skill Name:** `{args.skill_name}`\n"
+                f"**Description:** {args.skill_description}\n"
+            )
 
         if args.additional_context:
             prompt += f"**Additional Context:** {args.additional_context}\n"
 
-        prompt += (
-            f"\n**Existing skills in .ciri/skills/:** {existing_list}\n\n"
-            f"If `{args.skill_name}` already exists in the list above, report that "
-            f"it already exists and stop. Otherwise, research the topic thoroughly "
-            f"using web search and crawling, then create the skill directory and "
-            f"SKILL.md file at `/.ciri/skills/{args.skill_name}/SKILL.md`."
-        )
+        prompt += f"\n**Existing skills in .ciri/skills/:** {existing_list}\n\n"
+
+        if is_update:
+            prompt += (
+                f"The skill `{args.skill_name}` already exists. Here is its current "
+                f"SKILL.md content:\n\n"
+                f"---BEGIN EXISTING SKILL.md---\n"
+                f"{existing_content}\n"
+                f"---END EXISTING SKILL.md---\n\n"
+                f"Read the existing content carefully. Research the topic to find any "
+                f"updates or improvements, then rewrite the SKILL.md at "
+                f"`/.ciri/skills/{args.skill_name}/SKILL.md` — preserving valuable "
+                f"existing content while incorporating the new description, fixing "
+                f"outdated information, and adding any missing sections."
+            )
+        else:
+            prompt += (
+                f"Research the topic thoroughly using web search and crawling, then "
+                f"create the skill directory and SKILL.md file at "
+                f"`/.ciri/skills/{args.skill_name}/SKILL.md`."
+            )
 
         return prompt
 
-    def _invoke_generator(self, request: ModelRequest, args: SkillGeneratorArgs) -> str:
+    def _invoke_generator(
+        self,
+        request: ModelRequest,
+        args: SkillGeneratorArgs,
+        existing_content: Optional[str] = None,
+    ) -> str:
         """Invoke the skill generator agent synchronously."""
         agent = self._create_generator_agent(request)
-        prompt = self._build_generation_prompt(args)
+        prompt = self._build_generation_prompt(args, existing_content)
 
         result = agent.invoke(
             {"messages": [HumanMessage(content=prompt)]},
@@ -242,11 +288,14 @@ class SkillGeneratorMiddleware(AgentMiddleware):
         return self._extract_result(result)
 
     async def _ainvoke_generator(
-        self, request: ModelRequest, args: SkillGeneratorArgs
+        self,
+        request: ModelRequest,
+        args: SkillGeneratorArgs,
+        existing_content: Optional[str] = None,
     ) -> str:
         """Invoke the skill generator agent asynchronously."""
         agent = self._create_generator_agent(request)
-        prompt = self._build_generation_prompt(args)
+        prompt = self._build_generation_prompt(args, existing_content)
 
         result = await agent.ainvoke(
             {"messages": [HumanMessage(content=prompt)]},
@@ -276,28 +325,28 @@ class SkillGeneratorMiddleware(AgentMiddleware):
         def generate_skill(**kwargs) -> str:
             args = SkillGeneratorArgs(**kwargs)
 
-            # Pre-check: does this skill already exist?
-            existing = self._get_existing_skills()
-            if args.skill_name in existing:
-                return (
-                    f"Skill `{args.skill_name}` already exists in .ciri/skills/. "
-                    f"No action taken. Existing skills: {', '.join(existing)}"
+            # Check if skill already exists — if so, read it for updating
+            existing_content = self._read_existing_skill(args.skill_name)
+            if existing_content is not None:
+                logger.info(
+                    "Skill '%s' exists — reading current content for update.",
+                    args.skill_name,
                 )
 
-            return self._invoke_generator(request, args)
+            return self._invoke_generator(request, args, existing_content)
 
         async def agenerate_skill(**kwargs) -> str:
             args = SkillGeneratorArgs(**kwargs)
 
-            # Pre-check: does this skill already exist?
-            existing = self._get_existing_skills()
-            if args.skill_name in existing:
-                return (
-                    f"Skill `{args.skill_name}` already exists in .ciri/skills/. "
-                    f"No action taken. Existing skills: {', '.join(existing)}"
+            # Check if skill already exists — if so, read it for updating
+            existing_content = self._read_existing_skill(args.skill_name)
+            if existing_content is not None:
+                logger.info(
+                    "Skill '%s' exists — reading current content for update.",
+                    args.skill_name,
                 )
 
-            return await self._ainvoke_generator(request, args)
+            return await self._ainvoke_generator(request, args, existing_content)
 
         return StructuredTool.from_function(
             args_schema=SkillGeneratorArgs,
@@ -306,12 +355,13 @@ class SkillGeneratorMiddleware(AgentMiddleware):
             name="generate_skill",
             description=(
                 "Research a topic using web search, web crawling, and internal knowledge, "
-                "then generate a new skill file (SKILL.md) in the .ciri/skills/ directory. "
-                "The generated skill follows the Agent Skills specification and can be "
-                "loaded by SkillsMiddleware for progressive disclosure to agents. "
-                "Use this when you want to learn a new capability by creating a reusable "
-                "skill that persists across sessions. The skill will NOT be generated if "
-                "it already exists in .ciri/skills/."
+                "then generate or update a skill file (SKILL.md) in the .ciri/skills/ "
+                "directory. The generated skill follows the Agent Skills specification "
+                "and can be loaded by SkillsMiddleware for progressive disclosure to "
+                "agents. Use this when you want to learn a new capability by creating a "
+                "reusable skill that persists across sessions. If the skill already "
+                "exists, it will be read fully and updated with new research and context "
+                "while preserving valuable existing content."
             ),
         )
 
