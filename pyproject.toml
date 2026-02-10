@@ -23,7 +23,6 @@ dependencies = [
     "langgraph",
     "deepagents",
     "crawl4ai",
-    "browser-use",
     "duckduckgo-search",
     "ddgs",
     "sqlite-vec",

@@ -100,17 +100,17 @@ def build(target: str | None = None) -> Path:
         "sqlite_vec",
         "langgraph.cache",
         "langgraph.cache.base",
+        "langgraph_swarm",
         # Deep agents
         "deepagents",
-        "deepagents.backends",
-        # Browser/crawling tools
-        "browser_use",
-        "browser_use.browser",
-        "browser_use.browser.profile",
-        "browser_use.llm",
-        "browser_use.llm.openrouter",
-        "browser_use.llm.openrouter.chat",
         "crawl4ai",
+        # CLI and UI
+        "typer",
+        "rich",
+        "anyio",
+        "httpx",
+        "tenacity",
+        "orjson",
         # Other dependencies
         "pydantic",
         "pydantic._internal",
@@ -124,17 +124,21 @@ def build(target: str | None = None) -> Path:
         "yaml",
         "openai",
         "duckduckgo_search",
+        "ddgs",
+        "sqlalchemy",
+        "structlog",
+        "opentelemetry",
+        "packaging",
+        "platformdirs",
         # Local src modules
-        "agent",
-        "controllers",
-        "toolkit",
-        "toolkit.browser_use_tool",
-        "toolkit.web_crawler_tool",
-        "toolkit.human_follow_up_tool",
-        "middlewares",
-        "middlewares.artifacts",
-        "middlewares.consciousness",
-        "middlewares.frontend_tools",
+        "src",
+        "src.agent",
+        "src.db",
+        "src.subagents",
+        "src.serializers",
+        "src.utils",
+        "src.toolkit",
+        "src.middlewares",
     ]
 
     # PyInstaller command
@@ -169,6 +173,10 @@ def build(target: str | None = None) -> Path:
         "pydantic",
         "--collect-all",
         "pydantic_core",
+        "--collect-all",
+        "crawl4ai",
+        "--collect-all",
+        "playwright",
     ]
 
     # Add all hidden imports

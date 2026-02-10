@@ -36,7 +36,7 @@ from langgraph.types import Command
 import aiosqlite
 
 # Local imports
-from .agent import Ciri, LLMConfig, WebSurferBrowserConfig, ResumeCommand
+from .agent import Ciri, LLMConfig, ResumeCommand
 from .db import CiriDatabase
 from .serializers import CiriJsonPlusSerializer
 from .utils import (
@@ -1111,10 +1111,29 @@ async def interactive_chat():
         db = CiriDatabase()
     console.print("[green]✓ Database ready[/green]")
 
-    # Step 5: Initialize LLM & agent
+    # Step 5: Setup browser profile for web research
+    browser_profile = _setup_browser_profile()
+    browser_name = None
+    profile_directory = None
+    if browser_profile is not None:
+        _copied_dir, profile_directory = browser_profile
+        # Detect browser name from the persisted choice
+        saved_raw = os.getenv("CIRI_BROWSER_PROFILE")
+        if saved_raw:
+            try:
+                saved = json.loads(saved_raw)
+                browser_name = saved.get("browser")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # Step 6: Initialize LLM & agent
     with console.status("[bold cyan]⏳ Initializing LLM agent...[/bold cyan]"):
         llm_config = LLMConfig(model=model)
-        ciri_app = Ciri(llm_config=llm_config)
+        ciri_app = Ciri(
+            llm_config=llm_config,
+            browser_name=browser_name,
+            profile_directory=profile_directory,
+        )
 
     async with aiosqlite.connect(db.db_path) as conn:
         with console.status("[bold cyan]⏳ Compiling agent graph...[/bold cyan]"):
@@ -1123,7 +1142,7 @@ async def interactive_chat():
             graph = ciri_app.compile(checkpointer=checkpointer)
         console.print("[green]✓ Agent ready[/green]")
 
-        # Step 6: Create initial thread and build completer
+        # Step 7: Create initial thread and build completer
         with console.status("[bold cyan]⏳ Setting up workspace...[/bold cyan]"):
             thread = db.create_thread()
             current_thread_id = thread["id"]
@@ -1208,7 +1227,11 @@ async def interactive_chat():
                             os.environ["CIRI_MODEL"] = new_model
                             # Re-initialize agent with new model
                             llm_config = LLMConfig(model=new_model)
-                            ciri_app = Ciri(llm_config=llm_config)
+                            ciri_app = Ciri(
+                                llm_config=llm_config,
+                                browser_name=browser_name,
+                                profile_directory=profile_directory,
+                            )
                             graph = ciri_app.compile(checkpointer=checkpointer)
                             console.print(
                                 f"[green]Model switched to {new_model}[/green]"

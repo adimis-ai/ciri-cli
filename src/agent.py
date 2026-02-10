@@ -9,7 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-from browser_use import Browser
 from functools import cached_property
 from langchain.agents import AgentState
 from langgraph.types import Checkpointer
@@ -20,7 +19,6 @@ from langgraph.cache.base import BaseCache
 from deepagents.backends import FilesystemBackend
 from deepagents import SubAgent, CompiledSubAgent
 from pydantic import BaseModel, Field, ConfigDict
-from browser_use.llm.openrouter.chat import ChatOpenRouter
 from langchain.chat_models import init_chat_model, BaseChatModel
 from langchain.agents.middleware import AgentMiddleware, ToolRetryMiddleware
 from typing import (
@@ -54,6 +52,7 @@ from .toolkit import (
     follow_up_with_human,
     FollowUpInterruptValue,
 )
+from .subagents.web_researcher import build_web_researcher_agent
 from .utils import get_default_filesystem_root, load_all_dotenv, find_windows_bash
 
 load_all_dotenv()
@@ -191,15 +190,6 @@ class LLMConfig(BaseModel):
             )
 
         return init_chat_model(model=self.model, **config)
-
-    def init_browser_use_model(self) -> ChatOpenRouter:
-        if not self._is_openrouter:
-            raise ValueError("BrowserUse requires an OpenRouter model.")
-
-        config = {k: v for k, v in self._resolved_api_config.items() if k != "base_url"}
-
-        # IMPORTANT: pass FULL router model string
-        return ChatOpenRouter(model=self.model, **config)
 
 
 class ShellToolConfig(BaseModel):
@@ -554,6 +544,10 @@ class Ciri(BaseModel):
     llm_config: LLMConfig
     instructions: Optional[str] = None
     include_follow_up_with_human_tool: bool = True
+    web_search: bool = True
+    browser_name: Optional[str] = None
+    profile_directory: Optional[str] = None
+    headless: Optional[bool] = None
     mcp_connections: Optional[Dict[str, Any]] = None
     shell_tool_config: Optional[ShellToolConfig] = None
     interrupt_on: Optional[Union[bool, Dict[str, Any]]] = (
@@ -564,26 +558,45 @@ class Ciri(BaseModel):
         self,
         root_dir: Path,
     ) -> List[Union[SubAgent, CompiledSubAgent]]:
-        """Compile all subagent configurations."""
+        """Compile all subagent configurations.
+
+        When ``self.web_search`` is True (default), the web-researcher
+        sub-agent is automatically included.  It uses the user's real
+        browser profile for anti-detection on guarded platforms.
+        """
+        subagents: List[Union[SubAgent, CompiledSubAgent]] = []
+
+        # --- Web researcher sub-agent ---
+        if self.web_search:
+            web_researcher = build_web_researcher_agent(
+                model=self.llm_config.init_langchain_model(),
+                browser_name=self.browser_name,
+                profile_directory=self.profile_directory,
+                headless=self.headless,
+            )
+            subagents.append(web_researcher)
+
+        # --- YAML-defined sub-agents ---
         scanner = FileSystemScanner(root_dir)
         subagent_paths = scanner.scan_subagent_paths()
 
-        if not subagent_paths:
-            return []
-
-        compiler = SubAgentCompiler(
-            root_dir=root_dir,
-            parent_llm_config=self.llm_config,
-            parent_shell_config=self.shell_tool_config,
-            parent_mcp_connections=self.mcp_connections,
-        )
-
-        return [
-            compiler.compile(
-                SerializableSubAgent.model_validate(yaml.safe_load(path.read_text())),
+        if subagent_paths:
+            compiler = SubAgentCompiler(
+                root_dir=root_dir,
+                parent_llm_config=self.llm_config,
+                parent_shell_config=self.shell_tool_config,
+                parent_mcp_connections=self.mcp_connections,
             )
-            for path in subagent_paths
-        ]
+            subagents.extend(
+                compiler.compile(
+                    SerializableSubAgent.model_validate(
+                        yaml.safe_load(path.read_text())
+                    ),
+                )
+                for path in subagent_paths
+            )
+
+        return subagents
 
     def _create_ciri(
         self,
