@@ -662,6 +662,108 @@ def _render_follow_up_interrupt(val: dict) -> None:
         console.print()
 
 
+def _render_script_execution_interrupt(val: dict) -> None:
+    """Beautifully render a script_execution interrupt for user approval."""
+    language = val.get("language", "unknown")
+    script_content = val.get("script_content", "")
+    dependencies = val.get("dependencies", [])
+    working_dir = val.get("working_dir")
+    output_dir = val.get("output_dir")
+    timeout = val.get("timeout", 120)
+    cleanup = val.get("cleanup", True)
+
+    lang_label = {"python": "Python", "javascript": "JavaScript"}.get(
+        language, language
+    )
+
+    console.print(
+        Panel(
+            f"[bold cyan]📜 Script Execution Approval Required[/bold cyan]\n"
+            f"[dim]The model wants to execute a [bold]{lang_label}[/bold] script. Please review:[/dim]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
+
+    # Script content with syntax highlighting
+    lexer = "python" if language == "python" else "javascript"
+    console.print(
+        Syntax(
+            script_content,
+            lexer,
+            theme="monokai",
+            line_numbers=True,
+            padding=1,
+        )
+    )
+
+    # Details table
+    if dependencies:
+        deps_str = ", ".join(dependencies)
+        console.print(f"\n  [dim]Dependencies:[/dim]  [bold]{deps_str}[/bold]")
+    if working_dir:
+        console.print(f"  [dim]Working dir:[/dim]   {working_dir}")
+    if output_dir:
+        console.print(f"  [dim]Output dir:[/dim]    {output_dir}")
+    console.print(f"  [dim]Timeout:[/dim]       {timeout}s")
+    console.print(f"  [dim]Cleanup:[/dim]       {'Yes' if cleanup else 'No'}")
+    console.print()
+
+
+async def _handle_script_execution(
+    graph, val: dict, config: dict, completer: CiriCompleter
+) -> None:
+    """Handle a script_execution interrupt (approve / reject / edit)."""
+    decision = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: pt_prompt(
+            "  [cyan]Decision (approve/reject/edit)[/cyan]> ",
+            completer=completer,
+        ),
+    )
+    decision = decision.strip().lower()
+
+    if decision == "approve":
+        command = Command(resume="approved")
+
+    elif decision == "reject":
+        reason = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: pt_prompt("  [cyan]Reason for rejection[/cyan]> ")
+        )
+        command = Command(resume={"status": "rejected", "reason": reason})
+
+    elif decision == "edit":
+        console.print(
+            "\n  [bold cyan]✏️  Edit Script[/bold cyan]\n"
+            "  [dim]Paste the updated script below. End with an empty line containing only 'EOF'.[/dim]\n"
+        )
+        lines = []
+        while True:
+            line = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: pt_prompt("  "),
+            )
+            if line.strip() == "EOF":
+                break
+            lines.append(line)
+
+        edited_script = "\n".join(lines)
+        if edited_script.strip():
+            console.print("  [green]✓ Script updated[/green]")
+            command = Command(
+                resume={"status": "edited", "script_content": edited_script}
+            )
+        else:
+            console.print("  [yellow]Empty script — approving original.[/yellow]")
+            command = Command(resume="approved")
+
+    else:
+        console.print(f"  [red]Unknown decision '{decision}'. Using 'approve'.[/red]")
+        command = Command(resume="approved")
+
+    await run_graph(graph, command, config, completer)
+
+
 async def handle_interrupts(graph, state, config, completer: CiriCompleter) -> None:
     """Handle all pending interrupts from the graph state with beautiful rendering."""
     snapshot = state.values
@@ -683,7 +785,11 @@ async def handle_interrupts(graph, state, config, completer: CiriCompleter) -> N
             continue
 
         # Route to appropriate handler based on interrupt type
-        if isinstance(val, dict) and val.get("type") == "human_follow_up":
+        if isinstance(val, dict) and val.get("type") == "script_execution":
+            _render_script_execution_interrupt(val)
+            await _handle_script_execution(graph, val, config, completer)
+
+        elif isinstance(val, dict) and val.get("type") == "human_follow_up":
             _render_follow_up_interrupt(val)
             await _handle_follow_up(graph, val, config, completer)
 

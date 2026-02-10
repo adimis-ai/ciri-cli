@@ -52,6 +52,7 @@ from .middlewares import TeamRuntimeMiddleware
 from .toolkit import (
     follow_up_with_human,
     FollowUpInterruptValue,
+    build_script_executor_tool,
 )
 from .subagents.web_researcher import build_web_researcher_agent
 from .utils import get_default_filesystem_root, load_all_dotenv, find_windows_bash
@@ -79,6 +80,16 @@ You have access to a `task` tool for delegating work to specialized subagents. *
 - **For ANY web-related task** (browsing websites, taking screenshots, web research, searching the internet, scraping pages, interacting with web apps), you MUST use the **"Web Researcher"** subagent type. It has a real browser with Playwright, DuckDuckGo search, and a web crawler. The general-purpose agent does NOT have browser or internet access.
 - Use **"general-purpose"** only for tasks that involve local files, code analysis, or computation — never for web access.
 - Always specify `subagent_type` exactly as listed in the task tool description (case-sensitive, including spaces).
+
+# Script Execution
+
+You have an `execute_script` tool for creating and running Python or JavaScript scripts with package dependencies. Use it when:
+- A task requires installing packages (pip/npm) and running code
+- You need to run multi-line scripts that are easier to write as files than shell one-liners
+- You need isolated execution with automatic cleanup
+- You need to produce output files (screenshots, HTML, data exports, etc.)
+
+The tool handles virtual environment creation, dependency installation, script execution, and cleanup automatically. Always specify dependencies explicitly. Set cleanup=False if the user needs output files to persist. Use output_dir to control where generated files are saved.
 """
 
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -664,6 +675,9 @@ class Ciri(BaseModel):
             custom_tools=tools,
             include_follow_up_with_human=self.include_follow_up_with_human_tool,
         )
+
+        # Add script executor tool (always available)
+        agent_tools.append(build_script_executor_tool())
 
         # Build system prompt
         system_prompt = CIRI_SYSTEM_PROMPT
