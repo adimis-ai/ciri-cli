@@ -10,7 +10,6 @@ from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langchain_community.tools import DuckDuckGoSearchResults
-from langchain_community.agent_toolkits import PlayWrightBrowserToolkit
 
 from langgraph.errors import GraphInterrupt
 from langchain.agents.middleware import (
@@ -278,6 +277,38 @@ def _launch_persistent_sync_browser(
 # ---------------------------------------------------------------------------
 
 
+def _build_tools_from_browser(async_browser) -> list[BaseTool]:  # noqa: ANN001
+    """Build Playwright tools from an async browser or adapter.
+
+    Uses ``model_construct`` to bypass pydantic ``isinstance`` validation so
+    that our ``_AsyncBrowserContextAdapter`` (or a real ``Browser``) can be
+    used interchangeably.
+    """
+    from langchain_community.tools.playwright.click import ClickTool
+    from langchain_community.tools.playwright.current_page import CurrentWebPageTool
+    from langchain_community.tools.playwright.extract_hyperlinks import (
+        ExtractHyperlinksTool,
+    )
+    from langchain_community.tools.playwright.extract_text import ExtractTextTool
+    from langchain_community.tools.playwright.get_elements import GetElementsTool
+    from langchain_community.tools.playwright.navigate import NavigateTool
+    from langchain_community.tools.playwright.navigate_back import NavigateBackTool
+
+    tool_classes = [
+        ClickTool,
+        NavigateTool,
+        NavigateBackTool,
+        ExtractTextTool,
+        ExtractHyperlinksTool,
+        GetElementsTool,
+        CurrentWebPageTool,
+    ]
+    return [
+        cls.model_construct(async_browser=async_browser, sync_browser=None)
+        for cls in tool_classes
+    ]
+
+
 async def get_playwright_tools(
     profile_info: Optional[dict] = None,
     headless: Optional[bool] = None,
@@ -306,8 +337,7 @@ async def get_playwright_tools(
                 headless=headless,
                 channel=channel,
             )
-            toolkit = PlayWrightBrowserToolkit(async_browser=adapter)
-            return toolkit.get_tools()
+            return _build_tools_from_browser(adapter)
         except Exception:
             logger.warning(
                 "Failed to launch persistent browser context — "
@@ -322,8 +352,7 @@ async def get_playwright_tools(
     browser = await pw.chromium.launch(
         headless=headless, args=list(_STEALTH_ARGS)
     )
-    toolkit = PlayWrightBrowserToolkit.from_browser(async_browser=browser)
-    return toolkit.get_tools()
+    return _build_tools_from_browser(browser)
 
 
 # ---------------------------------------------------------------------------
