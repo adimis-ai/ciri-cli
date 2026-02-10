@@ -179,22 +179,30 @@ class PlaywrightBrowserInit:
     def __init__(self, profile_path: str, launch_kwargs: dict):
         self.profile_path = profile_path
         self.launch_kwargs = launch_kwargs
+        self._pw = None
+        self._browser = None
 
     def get_sync_browser(self) -> "SyncBrowser":
-        from playwright.sync_api import sync_playwright
+        if self._browser is None:
+            from playwright.sync_api import sync_playwright
 
-        pw = sync_playwright().start()
-        return pw.chromium.launch_persistent_context(
-            self.profile_path, **self.launch_kwargs
-        ).browser
+            self._pw = sync_playwright().start()
+            self._browser = self._pw.chromium.launch_persistent_context(
+                self.profile_path, **self.launch_kwargs
+            ).browser
+        return self._browser
 
     def get_async_browser(self) -> "AsyncBrowser":
-        from playwright.async_api import async_playwright
+        if self._browser is None:
+            from playwright.async_api import async_playwright
 
-        pw = run_async(async_playwright().start())
-        return run_async(pw.chromium.launch_persistent_context(
-            self.profile_path, **self.launch_kwargs
-        )).browser
+            self._pw = run_async(async_playwright().start())
+            self._browser = run_async(
+                self._pw.chromium.launch_persistent_context(
+                    self.profile_path, **self.launch_kwargs
+                )
+            ).browser
+        return self._browser
 
 
 def get_playwright_tools(
@@ -225,8 +233,8 @@ def get_playwright_tools(
     browser_initializer = PlaywrightBrowserInit(profile_path, launch_kwargs)
 
     adapter = PlayWrightBrowserToolkit.from_browser(
-        # sync_browser=browser_initializer.get_sync_browser,
-        async_browser=browser_initializer.get_async_browser,
+        # sync_browser=browser_initializer.get_sync_browser(),
+        async_browser=browser_initializer.get_async_browser(),
     )
     return adapter.get_tools()
 
