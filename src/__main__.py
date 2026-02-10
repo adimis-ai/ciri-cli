@@ -394,8 +394,6 @@ def render_tool_call(tool_call: dict) -> None:
     args = tool_call.get("args", {})
     try:
         args_str = json.dumps(args, indent=2, default=str)
-        if len(args_str) > 500:
-            args_str = args_str[:500] + "\n  ..."
         console.print(f"\n[bold yellow]Tool Call:[/bold yellow] [cyan]{name}[/cyan]")
         console.print(Syntax(args_str, "json", theme="monokai", line_numbers=False))
     except (TypeError, ValueError):
@@ -458,11 +456,7 @@ def render_tool_message(message: ToolMessage) -> None:
             pass
 
     # Default rendering for other tools
-    if len(content) > 300:
-        content_preview = content[:300] + "..."
-    else:
-        content_preview = content
-    console.print(f"[dim]{content_preview}[/dim]")
+    console.print(f"[dim]{content}[/dim]")
 
 
 def render_human_message(message) -> None:
@@ -543,8 +537,6 @@ async def render_thread_history(graph, config: dict) -> None:
                 # dict-based tool message
                 name = msg.get("name", msg.get("tool_call_id", "tool"))
                 content = _get_msg_content(msg)
-                if len(content) > 300:
-                    content = content[:300] + "..."
                 console.print(f"\n[bold magenta]Tool Response ({name}):[/bold magenta]")
                 console.print(f"[dim]{content}[/dim]")
 
@@ -841,15 +833,16 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
     """Run the graph with dual stream mode and handle output + interrupts."""
     current_ai_message = ""
     prefix_printed = False
-    # Accumulate tool calls by index: {index: {id, name, args_str}}
-    # We use index to correlate chunks because `id` is only set on the first chunk
-    pending_tool_calls_by_index: dict[int, dict[str, str]] = {}
+    last_namespace = None
+    # Accumulate tool calls by (namespace, index): {(namespace, index): {id, name, args_str}}
+    pending_tool_calls_by_key: dict[tuple[tuple[str, ...], int], dict[str, str]] = {}
     rendered_tool_call_ids: set[str] = set()
 
     def _flush_pending_tool_calls():
         """Render any accumulated tool calls that are complete."""
-        for tc_idx, tc_data in list(pending_tool_calls_by_index.items()):
-            tc_id = tc_data.get("id", str(tc_idx))
+        for key, tc_data in list(pending_tool_calls_by_key.items()):
+            namespace, tc_idx = key
+            tc_id = tc_data.get("id", f"{namespace}-{tc_idx}")
             if tc_id in rendered_tool_call_ids:
                 continue
             # Parse accumulated args string into dict
@@ -865,6 +858,11 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
         async for namespace, stream_type, chunk in graph.astream(
             inputs, config, stream_mode=["updates", "messages"], subgraphs=True
         ):
+            # If namespace changes, we may need to print a new prefix
+            if namespace != last_namespace:
+                prefix_printed = False
+                last_namespace = namespace
+
             # ----- Messages stream: token-by-token AI output -----
             if stream_type == "messages":
                 message, metadata = chunk
@@ -873,7 +871,7 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
                 if isinstance(message, BaseMessageChunk):
                     if message.content:
                         # Flush any pending tool calls before printing text
-                        if pending_tool_calls_by_index:
+                        if pending_tool_calls_by_key:
                             status.stop()
                             _flush_pending_tool_calls()
 
@@ -901,8 +899,6 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
                                     current_ai_message += text
 
                     # Accumulate tool call chunks incrementally
-                    # Chunks use `index` to correlate parts of the same tool call;
-                    # `id` is only present on the first chunk for a given call.
                     if (
                         hasattr(message, "tool_call_chunks")
                         and message.tool_call_chunks
@@ -912,9 +908,10 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
                             tc_name = tc_chunk.get("name")
                             tc_args = tc_chunk.get("args", "")
                             tc_index = tc_chunk.get("index", 0)
+                            key = (namespace, tc_index)
 
-                            if tc_index not in pending_tool_calls_by_index:
-                                pending_tool_calls_by_index[tc_index] = {
+                            if key not in pending_tool_calls_by_key:
+                                pending_tool_calls_by_key[key] = {
                                     "id": tc_id or "",
                                     "name": tc_name or "",
                                     "args_str": "",
@@ -922,23 +919,23 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
                             # Update id if we get it (only on the first chunk)
                             if (
                                 tc_id
-                                and not pending_tool_calls_by_index[tc_index]["id"]
+                                and not pending_tool_calls_by_key[key]["id"]
                             ):
-                                pending_tool_calls_by_index[tc_index]["id"] = tc_id
+                                pending_tool_calls_by_key[key]["id"] = tc_id
                             if (
                                 tc_name
-                                and not pending_tool_calls_by_index[tc_index]["name"]
+                                and not pending_tool_calls_by_key[key]["name"]
                             ):
-                                pending_tool_calls_by_index[tc_index]["name"] = tc_name
+                                pending_tool_calls_by_key[key]["name"] = tc_name
                             if tc_args:
-                                pending_tool_calls_by_index[tc_index][
+                                pending_tool_calls_by_key[key][
                                     "args_str"
                                 ] += tc_args
 
                 # Complete Tool response messages
                 elif isinstance(message, ToolMessage):
                     # Flush pending tool calls before showing tool response
-                    if pending_tool_calls_by_index:
+                    if pending_tool_calls_by_key:
                         status.stop()
                         _flush_pending_tool_calls()
                     status.stop()
