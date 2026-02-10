@@ -6,8 +6,8 @@ import tempfile
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING, List, TypeVar, Coroutine, Any, Type
 
+from pydantic import Field, BaseModel
 from deepagents import CompiledSubAgent
-from pydantic import Field
 from langchain.agents import create_agent
 from langchain_core.tools import BaseTool
 from langchain_core.language_models import BaseChatModel
