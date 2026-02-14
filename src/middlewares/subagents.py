@@ -187,12 +187,6 @@ class SubAgentMiddleware(BaseSubAgentMiddleware):
         return self._wrap_model_call_common(request, handler, is_async=False)
 
     def _wrap_model_call_common(self, request, handler, is_async=False):
-        # We should call super().wrap_model_call but we need to ensure self.subagents is updated first
-
-        # The base class uses self.subagents.
-        # We updated self.subagents in _refresh_subagents.
-
-        # We also need to update all_available_tools logic from the original wrap_model_call
         available_tools = set()
         if request.tools:
             for tool in request.tools:
