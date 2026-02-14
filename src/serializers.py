@@ -11,7 +11,7 @@ from langchain_core.messages import AnyMessage, BaseMessage
 from langgraph.types import StateSnapshot
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from .agent import (
+from .copilot import (
     CiriState,
     ResumeCommand,
     InterruptValue,
