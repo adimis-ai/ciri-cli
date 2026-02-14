@@ -262,15 +262,21 @@ Skip this step only if the skill being developed already exists, and iteration o
 
 When creating a new skill from scratch, always run the `init_skill.py` script. The script conveniently generates a new template skill directory that automatically includes everything a skill requires, making the skill creation process much more efficient and reliable.
 
+**Important:** Skills must be placed in a `.ciri/skills` directory for the Ciri agent to automatically discover and load them. The initialization script defaults to this location.
+
 Usage:
 
 ```bash
+# Default: Creates skill in .ciri/skills/<skill-name>
+scripts/init_skill.py <skill-name>
+
+# Optional: Specify custom path
 scripts/init_skill.py <skill-name> --path <output-directory>
 ```
 
 The script:
 
-- Creates the skill directory at the specified path
+- Creates the skill directory (defaulting to `.ciri/skills/<skill-name>`)
 - Generates a SKILL.md template with proper frontmatter and TODO placeholders
 - Creates example resource directories: `scripts/`, `references/`, and `assets/`
 - Adds example files in each directory that can be customized or deleted

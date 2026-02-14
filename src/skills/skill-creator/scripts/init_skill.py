@@ -3,12 +3,11 @@
 Skill Initializer - Creates a new skill from template
 
 Usage:
-    init_skill.py <skill-name> --path <path>
+    init_skill.py <skill-name> [--path <path>]
 
 Examples:
-    init_skill.py my-new-skill --path skills/public
-    init_skill.py my-api-helper --path skills/private
-    init_skill.py custom-skill --path /custom/location
+    init_skill.py my-new-skill                  # Creates in .ciri/skills/my-new-skill
+    init_skill.py my-api-helper --path skills   # Creates in skills/my-api-helper
 """
 
 import sys
@@ -271,25 +270,41 @@ def init_skill(skill_name, path):
 
 
 def main():
-    if len(sys.argv) < 4 or sys.argv[2] != '--path':
-        print("Usage: init_skill.py <skill-name> --path <path>")
+    if len(sys.argv) < 2:
+        print("Usage: init_skill.py <skill-name> [--path <path>]")
         print("\nSkill name requirements:")
         print("  - Kebab-case identifier (e.g., 'my-data-analyzer')")
         print("  - Lowercase letters, digits, and hyphens only")
         print("  - Max 64 characters")
         print("  - Must match directory name exactly")
         print("\nExamples:")
-        print("  init_skill.py my-new-skill --path skills/public")
+        print("  init_skill.py my-new-skill")
         print("  init_skill.py my-api-helper --path skills/private")
-        print("  init_skill.py custom-skill --path /custom/location")
         sys.exit(1)
 
     skill_name = sys.argv[1]
-    path = sys.argv[3]
+    
+    # Default path is .ciri/skills in the current working directory
+    # This assumes the script is run from the project root or relative to it
+    # Ideally, we'd find the project root, but for now specific relative path is standard
+    path = ".ciri/skills"
+    
+    if len(sys.argv) >= 4 and sys.argv[2] == '--path':
+        path = sys.argv[3]
+    elif len(sys.argv) > 2:
+        print("Usage: init_skill.py <skill-name> [--path <path>]")
+        sys.exit(1)
 
     print(f"🚀 Initializing skill: {skill_name}")
     print(f"   Location: {path}")
     print()
+
+    # Ensure the parent directory exists
+    try:
+        Path(path).mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        print(f"❌ Error creating parent directory {path}: {e}")
+        sys.exit(1)
 
     result = init_skill(skill_name, path)
 
