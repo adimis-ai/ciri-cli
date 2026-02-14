@@ -216,7 +216,9 @@ def _execute_python(
                 timeout=300,
             )
             if proc.returncode != 0:
-                results.append(f"WARNING: Playwright browser install failed: {proc.stderr}")
+                results.append(
+                    f"WARNING: Playwright browser install failed: {proc.stderr}"
+                )
             else:
                 results.append("Playwright chromium browser installed.")
 
@@ -349,7 +351,12 @@ def _list_output_files(output_dir: Path, temp_base: Path) -> List[str]:
             if rel.startswith(".venv") or rel.startswith("node_modules"):
                 continue
             # Skip the script itself if output_dir == temp_base
-            if f.name in ("script.py", "script.js", "package.json", "package-lock.json"):
+            if f.name in (
+                "script.py",
+                "script.js",
+                "package.json",
+                "package-lock.json",
+            ):
                 continue
             output_files.append(str(f))
 

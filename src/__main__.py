@@ -39,6 +39,7 @@ import aiosqlite
 from .agent import Ciri, LLMConfig, ResumeCommand
 from .db import CiriDatabase
 from .serializers import CiriJsonPlusSerializer
+from .controller import CiriController
 from .utils import (
     get_default_filesystem_root,
     get_app_data_dir,
@@ -376,23 +377,25 @@ async def fetch_openrouter_models() -> List[str]:
 
                     # 3. Tool calling support (supported_parameters contains 'tools' or 'functions')
                     supported_params = m.get("supported_parameters", [])
-                    has_tools = "tools" in supported_params or "functions" in supported_params
+                    has_tools = (
+                        "tools" in supported_params or "functions" in supported_params
+                    )
 
                     if has_vision and has_tools:
                         model_id = m["id"]
-                        
+
                         # Check if it's a free model (pricing is "0" for both prompt and completion)
                         pricing = m.get("pricing", {})
                         is_free = (
-                            pricing.get("prompt") == "0" and 
-                            pricing.get("completion") == "0"
+                            pricing.get("prompt") == "0"
+                            and pricing.get("completion") == "0"
                         )
-                        
+
                         if is_free:
                             model_id += " (free)"
-                            
+
                         models.append(model_id)
-                
+
                 # Sort alphabetically, but put free models or specific preferred ones first if needed?
                 # For now just return as-is or sorted.
                 return sorted(models)
@@ -524,9 +527,9 @@ def _get_msg_content(msg) -> str:
     return c if isinstance(c, str) else str(c)
 
 
-async def render_thread_history(graph, config: dict) -> None:
+async def render_thread_history(controller: CiriController, config: dict) -> None:
     """Load and display chat history for the current thread."""
-    state = await graph.aget_state(config)
+    state = await controller.get_state(config)
     if not state or not state.values:
         console.print("[dim]No history in this thread.[/dim]")
         return
@@ -711,7 +714,7 @@ def _render_script_execution_interrupt(val: dict) -> None:
 
 
 async def _handle_script_execution(
-    graph, val: dict, config: dict, completer: CiriCompleter
+    controller: CiriController, val: dict, config: dict, completer: CiriCompleter
 ) -> None:
     """Handle a script_execution interrupt (approve / reject / edit)."""
     decision = await asyncio.get_event_loop().run_in_executor(
@@ -761,10 +764,12 @@ async def _handle_script_execution(
         console.print(f"  [red]Unknown decision '{decision}'. Using 'approve'.[/red]")
         command = Command(resume="approved")
 
-    await run_graph(graph, command, config, completer)
+    await run_graph(controller, command, config, completer)
 
 
-async def handle_interrupts(graph, state, config, completer: CiriCompleter) -> None:
+async def handle_interrupts(
+    controller: CiriController, state, config, completer: CiriCompleter
+) -> None:
     """Handle all pending interrupts from the graph state with beautiful rendering."""
     snapshot = state.values
     interrupts = snapshot.get("__interrupt__", [])
@@ -784,21 +789,20 @@ async def handle_interrupts(graph, state, config, completer: CiriCompleter) -> N
         if not val:
             continue
 
-        # Route to appropriate handler based on interrupt type
-        if isinstance(val, dict) and val.get("type") == "script_execution":
+            # Route to appropriate handler based on interrupt type
             _render_script_execution_interrupt(val)
-            await _handle_script_execution(graph, val, config, completer)
+            await _handle_script_execution(controller, val, config, completer)
 
         elif isinstance(val, dict) and val.get("type") == "human_follow_up":
             _render_follow_up_interrupt(val)
-            await _handle_follow_up(graph, val, config, completer)
+            await _handle_follow_up(controller, val, config, completer)
 
         elif isinstance(val, dict) and "action_requests" in val:
             # HumanInTheLoopMiddleware interrupt
             action_requests = val.get("action_requests", [])
             review_configs = val.get("review_configs", [])
             _render_hitl_interrupt(val, action_requests, review_configs)
-            await _handle_tool_approval(graph, val, config, completer)
+            await _handle_tool_approval(controller, val, config, completer)
 
         else:
             # Unknown interrupt type — show beautifully formatted raw value
@@ -829,11 +833,11 @@ async def handle_interrupts(graph, state, config, completer: CiriCompleter) -> N
                     "\n[cyan]Your response[/cyan]> ", completer=completer
                 ),
             )
-            await run_graph(graph, Command(resume=response), config, completer)
+            await run_graph(controller, Command(resume=response), config, completer)
 
 
 async def _handle_follow_up(
-    graph, val: dict, config: dict, completer: CiriCompleter
+    controller: CiriController, val: dict, config: dict, completer: CiriCompleter
 ) -> None:
     """Handle a human_follow_up interrupt with beautiful option rendering."""
     question = val.get("question", "")
@@ -869,11 +873,11 @@ async def _handle_follow_up(
             lambda: pt_prompt("  [cyan]Your response[/cyan]> ", completer=completer),
         )
 
-    await run_graph(graph, Command(resume=response), config, completer)
+    await run_graph(controller, Command(resume=response), config, completer)
 
 
 async def _handle_tool_approval(
-    graph, val: dict, config: dict, completer: CiriCompleter
+    controller: CiriController, val: dict, config: dict, completer: CiriCompleter
 ) -> None:
     """Handle a tool approval interrupt (approve / reject / edit)."""
     action_requests = val.get("action_requests", [])
@@ -961,7 +965,7 @@ async def _handle_tool_approval(
         decisions = [{"type": "approve"} for _ in action_requests]
         command = Command(resume={"decisions": decisions})
 
-    await run_graph(graph, command, config, completer)
+    await run_graph(controller, command, config, completer)
 
 
 # ---------------------------------------------------------------------------
@@ -969,7 +973,12 @@ async def _handle_tool_approval(
 # ---------------------------------------------------------------------------
 
 
-async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = None):
+async def run_graph(
+    controller: CiriController,
+    inputs,
+    config,
+    completer: Optional[CiriCompleter] = None,
+):
     """Run the graph with dual stream mode and handle output + interrupts."""
     current_ai_message = ""
     prefix_printed = False
@@ -995,9 +1004,7 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
             rendered_tool_call_ids.add(tc_id)
 
     with console.status("[bold blue]Thinking...", spinner="dots") as status:
-        async for namespace, stream_type, chunk in graph.astream(
-            inputs, config, stream_mode=["updates", "messages"], subgraphs=True
-        ):
+        async for namespace, stream_type, chunk in controller.run(inputs, config):
             # If namespace changes, we may need to print a new prefix
             if namespace != last_namespace:
                 prefix_printed = False
@@ -1021,7 +1028,9 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
                             if namespace:
                                 sub_name = str(namespace[-1]).replace("_", " ").title()
                                 agent_name = f"CIRI ({sub_name})"
-                            console.print(f"\n[bold cyan]{agent_name}:[/bold cyan] ", end="")
+                            console.print(
+                                f"\n[bold cyan]{agent_name}:[/bold cyan] ", end=""
+                            )
                             prefix_printed = True
 
                         content = message.content
@@ -1057,20 +1066,12 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
                                     "args_str": "",
                                 }
                             # Update id if we get it (only on the first chunk)
-                            if (
-                                tc_id
-                                and not pending_tool_calls_by_key[key]["id"]
-                            ):
+                            if tc_id and not pending_tool_calls_by_key[key]["id"]:
                                 pending_tool_calls_by_key[key]["id"] = tc_id
-                            if (
-                                tc_name
-                                and not pending_tool_calls_by_key[key]["name"]
-                            ):
+                            if tc_name and not pending_tool_calls_by_key[key]["name"]:
                                 pending_tool_calls_by_key[key]["name"] = tc_name
                             if tc_args:
-                                pending_tool_calls_by_key[key][
-                                    "args_str"
-                                ] += tc_args
+                                pending_tool_calls_by_key[key]["args_str"] += tc_args
 
                 # Complete Tool response messages
                 elif isinstance(message, ToolMessage):
@@ -1104,14 +1105,14 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
         console.print()  # newline after streamed response
 
     # Check for pending interrupts after streaming ends
-    state = await graph.aget_state(config)
+    state = await controller.get_state(config)
     if state.next:
         if completer:
-            await handle_interrupts(graph, state, config, completer)
+            await handle_interrupts(controller, state, config, completer)
         else:
             # Fallback without completer (shouldn't normally happen)
             _completer = CiriCompleter(get_default_filesystem_root())
-            await handle_interrupts(graph, state, config, _completer)
+            await handle_interrupts(controller, state, config, _completer)
 
 
 # ---------------------------------------------------------------------------
@@ -1120,10 +1121,10 @@ async def run_graph(graph, inputs, config, completer: Optional[CiriCompleter] = 
 
 
 def handle_threads_command(
-    db: CiriDatabase, current_thread_id: str, completer: CiriCompleter
+    controller: CiriController, current_thread_id: str, completer: CiriCompleter
 ) -> Optional[str]:
     """List all threads and optionally switch. Returns new thread_id or None."""
-    threads = db.list_threads()
+    threads = controller.list_threads()
     if not threads:
         console.print("[yellow]No threads found.[/yellow]")
         return None
@@ -1162,31 +1163,33 @@ def handle_threads_command(
     return None
 
 
-def handle_new_thread_command(db: CiriDatabase) -> str:
+def handle_new_thread_command(controller: CiriController) -> str:
     """Create a new thread and return its id."""
-    thread = db.create_thread()
+    thread = controller.create_thread()
     console.print(f"[green]New thread created:[/green] {thread['id'][:8]}...")
     return thread["id"]
 
 
-def handle_delete_thread_command(db: CiriDatabase, current_thread_id: str) -> str:
+def handle_delete_thread_command(
+    controller: CiriController, current_thread_id: str
+) -> str:
     """Delete the current thread and return a new thread id to switch to."""
-    thread = db.get_thread(current_thread_id)
+    thread = controller.get_thread(current_thread_id)
     title = thread["title"] if thread else current_thread_id[:8]
     if not Confirm.ask(f"Delete thread [cyan]{title}[/cyan]?"):
         return current_thread_id
 
-    db.delete_thread(current_thread_id)
+    controller.delete_thread(current_thread_id)
     console.print(f"[red]Deleted thread:[/red] {title}")
 
     # Switch to most recent remaining thread, or create a new one
-    threads = db.list_threads()
+    threads = controller.list_threads()
     if threads:
         new_id = threads[0]["id"]
         console.print(f"[green]Switched to thread:[/green] {threads[0]['title']}")
         return new_id
     else:
-        new_thread = db.create_thread()
+        new_thread = controller.create_thread()
         console.print(f"[green]Created new thread:[/green] {new_thread['id'][:8]}...")
         return new_thread["id"]
 
@@ -1281,11 +1284,13 @@ async def interactive_chat():
             checkpointer = AsyncSqliteSaver(conn, serde=CiriJsonPlusSerializer())
             # Compile the agent graph
             graph = await ciri_app.compile(checkpointer=checkpointer)
+            # Initialize the controller
+            controller = CiriController(graph=graph, db=db)
         console.print("[green]✓ Agent ready[/green]")
 
         # Step 7: Create initial thread and build completer
         with console.status("[bold cyan]⏳ Setting up workspace...[/bold cyan]"):
-            thread = db.create_thread()
+            thread = controller.create_thread()
             current_thread_id = thread["id"]
             config = {"configurable": {"thread_id": current_thread_id}}
             is_first_message = True
@@ -1325,18 +1330,18 @@ async def interactive_chat():
                         new_id = await asyncio.get_event_loop().run_in_executor(
                             None,
                             lambda: handle_threads_command(
-                                db, current_thread_id, completer
+                                controller, current_thread_id, completer
                             ),
                         )
                         if new_id:
                             current_thread_id = new_id
                             config = {"configurable": {"thread_id": current_thread_id}}
                             is_first_message = False
-                            await render_thread_history(graph, config)
+                            await render_thread_history(controller, config)
                         continue
 
                     if stripped == "/new-thread":
-                        current_thread_id = handle_new_thread_command(db)
+                        current_thread_id = handle_new_thread_command(controller)
                         config = {"configurable": {"thread_id": current_thread_id}}
                         is_first_message = True
                         continue
@@ -1346,7 +1351,7 @@ async def interactive_chat():
                             await asyncio.get_event_loop().run_in_executor(
                                 None,
                                 lambda: handle_delete_thread_command(
-                                    db, current_thread_id
+                                    controller, current_thread_id
                                 ),
                             )
                         )
@@ -1374,6 +1379,7 @@ async def interactive_chat():
                                 profile_directory=profile_directory,
                             )
                             graph = await ciri_app.compile(checkpointer=checkpointer)
+                            controller = CiriController(graph=graph, db=db)
                             console.print(
                                 f"[green]Model switched to {new_model}[/green]"
                             )
@@ -1383,12 +1389,12 @@ async def interactive_chat():
                     # Auto-title thread from first message
                     if is_first_message:
                         title = stripped[:50] + ("..." if len(stripped) > 50 else "")
-                        db.rename_thread(current_thread_id, title)
+                        controller.rename_thread(current_thread_id, title)
                         is_first_message = False
 
-                    db.touch_thread(current_thread_id)
+                    controller.touch_thread(current_thread_id)
                     inputs = {"messages": [HumanMessage(content=user_input)]}
-                    await run_graph(graph, inputs, config, completer)
+                    await run_graph(controller, inputs, config, completer)
 
                 except KeyboardInterrupt:
                     console.print(

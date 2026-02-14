@@ -175,6 +175,7 @@ def _resolve_browser_profile(
 # Playwright tools resolution
 # ---------------------------------------------------------------------------
 
+
 class PlaywrightBrowserInit:
     def __init__(self, profile_path: str, launch_kwargs: dict):
         self.profile_path = profile_path
@@ -207,6 +208,7 @@ class PlaywrightBrowserInit:
 
 class NoInput(BaseModel):
     """Schema for tools that take no input."""
+
     pass
 
 
@@ -214,7 +216,9 @@ class TakeScreenshotTool(BaseTool):
     """Tool for taking a screenshot of the current webpage."""
 
     name: str = "take_screenshot"
-    description: str = "Takes a screenshot of the current webpage and returns it as a base64-encoded PNG data URL. Only use this when you need visual information about the page."
+    description: str = (
+        "Takes a screenshot of the current webpage and returns it as a base64-encoded PNG data URL. Only use this when you need visual information about the page."
+    )
     args_schema: Type[BaseModel] = NoInput
     async_browser: Any = Field(default=None, exclude=True)
 
@@ -231,14 +235,15 @@ class TakeScreenshotTool(BaseTool):
             contexts = self.async_browser.contexts
             if not contexts:
                 return "Error: No active browser context"
-            
+
             pages = contexts[0].pages
             if not pages:
                 return "Error: No active page"
-            
+
             page = pages[0]
-            
+
             import base64
+
             screenshot_bytes = await page.screenshot(type="png", full_page=False)
             base64_image = base64.b64encode(screenshot_bytes).decode("utf-8")
             return f"data:image/png;base64,{base64_image}"
@@ -252,7 +257,9 @@ async def get_playwright_tools(
     headless: bool = False,
     channel: Optional[str] = None,
 ):
-    print(f"[get_playwright_tools] Initializing Playwright browser toolkit with profile_directory={profile_directory}, headless={headless}, channel={channel}")
+    print(
+        f"[get_playwright_tools] Initializing Playwright browser toolkit with profile_directory={profile_directory}, headless={headless}, channel={channel}"
+    )
     print(f"[get_playwright_tools] User data dir: {user_data_dir}")
     # Chrome expects --user-data-dir=<parent> and --profile-directory=<subdir>.
     # launch_persistent_context(user_data_dir) maps to --user-data-dir, so we
@@ -263,7 +270,9 @@ async def get_playwright_tools(
         # Fallback to a temporary directory if no profile is provided
         temp_dir = tempfile.mkdtemp(prefix="ciri_playwright_")
         profile_path = temp_dir
-        logger.info("No browser profile provided; using temporary directory: %s", temp_dir)
+        logger.info(
+            "No browser profile provided; using temporary directory: %s", temp_dir
+        )
 
     launch_kwargs: dict = {
         "headless": headless,
@@ -281,11 +290,13 @@ async def get_playwright_tools(
         async_browser=await browser_initializer.get_async_browser(),
     )
     tools = adapter.get_tools()
-    
+
     # Add the screenshot tool
     tools.append(TakeScreenshotTool(async_browser=adapter.async_browser))
-    
-    print(f"Initialized Playwright browser with profile at {profile_path} with tools: {[tool.name for tool in tools]}")
+
+    print(
+        f"Initialized Playwright browser with profile at {profile_path} with tools: {[tool.name for tool in tools]}"
+    )
     return tools
 
 
@@ -644,7 +655,6 @@ async def build_web_researcher_agent(
         headless=effective_headless,
         channel=channel,
     )
-    
 
     # # --- crawl4ai crawler tool ---
     if not crawler_browser_config:
