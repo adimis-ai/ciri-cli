@@ -59,7 +59,6 @@ _STEALTH_ARGS: list[str] = [
 ]
 
 
-
 # ---------------------------------------------------------------------------
 # Playwright tools resolution
 # ---------------------------------------------------------------------------
@@ -507,7 +506,6 @@ async def build_web_researcher_agent(
             channel=channel,
         )
     tools.append(build_web_crawler_tool(browser_config=crawler_browser_config))
-
 
     # # --- DuckDuckGo search ---
     tools.append(DuckDuckGoSearchResults(name="simple_web_search"))

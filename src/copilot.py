@@ -24,14 +24,14 @@ from langchain.chat_models import BaseChatModel, init_chat_model
 from langchain.agents.middleware import AgentMiddleware, ToolRetryMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 
-from deepagents.backends import StateBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import CompiledSubAgent, SubAgent
 from deepagents.middleware.summarization import SummarizationMiddleware
 from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 
+from .serializers import LLMConfig
+from .backend import CiriBackend
 from .utils import (
-    CiriBackend,
     is_wsl,
     has_display,
     get_chrome_channel,
@@ -61,31 +61,34 @@ BASE_AGENT_PROMPT = "In order to complete the objective that the user asks of yo
 
 
 def create_copilot(
+    # Serializable Args
     debug: bool = False,
     name: str | None = None,
-    cache: BaseCache | None = None,
-    store: BaseStore | None = None,
     skills: list[str] | None = None,
     memory: list[str] | None = None,
     browser_name: Optional[str] = None,
-    model: BaseChatModel | None = None,
+    llm_config: LLMConfig | None = None,
+    use_headless_browser: Optional[bool] = None,
+    browser_profile_directory: Optional[str] = None,
+    system_prompt: str | SystemMessage | None = None,
+    crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
+    interrupt_on: dict[str, bool | InterruptOnConfig] | None = None,
+    *,
+    # Non-Serializable Args
+    cache: BaseCache | None = None,
+    store: BaseStore | None = None,
     backend: CiriBackend | None = None,
     context_schema: type[Any] | None = None,
     checkpointer: Checkpointer | None = None,
     middleware: Sequence[AgentMiddleware] = (),
-    use_headless_browser: Optional[bool] = None,
     response_format: ResponseFormat | None = None,
-    browser_profile_directory: Optional[str] = None,
-    system_prompt: str | SystemMessage | None = None,
     subagents: list[SubAgent | CompiledSubAgent] | None = None,
-    crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
-    interrupt_on: dict[str, bool | InterruptOnConfig] | None = None,
     tools: Sequence[BaseTool | Callable | dict[str, Any]] | None = None,
 ) -> CompiledStateGraph:
-    if model is None:
-        model = init_chat_model("openai:gpt-5-mini")
-    elif isinstance(model, str):
-        model = init_chat_model(model)
+    if llm_config is None:
+        llm_config = LLMConfig(model="openai/gpt-5-mini")
+
+    model = llm_config.init_langchain_model()
 
     if not checkpointer:
         checkpointer = InMemorySaver()
@@ -158,7 +161,6 @@ def create_copilot(
             ),
         ]
     )
-
 
     if (
         model.profile is not None
@@ -284,7 +286,10 @@ def create_copilot(
         # String: simple concatenation
         final_system_prompt = system_prompt + "\n\n" + full_base_prompt
 
-    merged_tools = list(tools or []) + [build_script_executor_tool(), follow_up_with_human]
+    merged_tools = list(tools or []) + [
+        build_script_executor_tool(),
+        follow_up_with_human,
+    ]
 
     return create_agent(
         model,

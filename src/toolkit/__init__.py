@@ -14,4 +14,3 @@ __all__ = [
     "build_script_executor_tool",
     "FollowUpInterruptValue",
 ]
-

@@ -450,4 +450,3 @@ def resolve_browser_profile(
         "profile_directory": selected["profile_directory"],
         "browser": selected["browser"],
     }
-

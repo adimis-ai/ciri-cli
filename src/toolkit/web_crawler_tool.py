@@ -62,7 +62,6 @@ def build_crawler_browser_config(
     return BrowserConfig(**kwargs)
 
 
-
 class WebCrawlerInput(BaseModel):
     url: str = Field(
         description="The primary URL of the webpage to crawl. Use this for extracting structured or textual content from known web pages."
