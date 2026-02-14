@@ -30,7 +30,7 @@ class ToolkitInjectorMiddleware(AgentMiddleware):
         super().__init__()
         self.root = Path(scan_root) if scan_root else get_default_filesystem_root()
         self.tools = []
-        
+
         # Track state to avoid unnecessary refreshes
         self._last_toolkit_state = set()
 
@@ -42,7 +42,7 @@ class ToolkitInjectorMiddleware(AgentMiddleware):
         try:
             # 1. Discover toolkit directories
             toolkit_dirs = self._discover_toolkits(self.root)
-            
+
             # 2. Check current state (paths + versions) to see if update is needed
             current_state = set()
             for tk_dir in toolkit_dirs:
@@ -56,7 +56,7 @@ class ToolkitInjectorMiddleware(AgentMiddleware):
                     # If we can't read version, include path but maybe mark as unknown version?
                     # Or just skip optimization for this one.
                     current_state.add((str(tk_dir.resolve()), "unknown"))
-            
+
             if current_state == self._last_toolkit_state:
                 logger.debug("Toolkits unchanged, skipping refresh.")
                 return
@@ -67,15 +67,15 @@ class ToolkitInjectorMiddleware(AgentMiddleware):
             # Note: _sync_and_manage_servers also reads pyproject.toml and manages versions
             # We could optimize by passing the versions we just read, but for now reuse existing method.
             self._sync_and_manage_servers(toolkit_dirs)
-            
+
             # 4. Initialize tools using MultiServerMCPClient
             # synchronous wrapper for async init if event loop is not running?
             # Existing code for _init_mcp_tools handles loop check.
             self._init_mcp_tools(toolkit_dirs)
-            
+
             # Update state only after successful init
             self._last_toolkit_state = current_state
-            
+
         except Exception as e:
             logger.error(f"Error refreshing toolkits: {e}")
 
@@ -243,7 +243,7 @@ class ToolkitInjectorMiddleware(AgentMiddleware):
         self._refresh_tools()
         self._inject_tools(request)
         return super().wrap_tool_call(request, handler)
-    
+
     async def awrap_tool_call(self, request, handler):
         """Inject toolkit tools into the tool call request (async)."""
         self._refresh_tools()

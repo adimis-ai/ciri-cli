@@ -56,7 +56,7 @@ class MemoryMiddleware(BaseMemoryMiddleware):
             if resolved_s not in seen:
                 final_sources.append(s)
                 seen.add(resolved_s)
-        
+
         self.sources = final_sources
 
     def _discover_memory_sources(self, root: Path) -> List[str]:

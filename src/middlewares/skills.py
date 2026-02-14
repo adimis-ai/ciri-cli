@@ -56,10 +56,10 @@ class SkillsMiddleware(BaseSkillsMiddleware):
             if resolved_s not in seen:
                 final_sources.append(s)
                 seen.add(resolved_s)
-        
+
         self.sources = final_sources
         # Update base class sources if needed, though usually middlewares use self.sources directly
-        # But deepagents BaseSkillsMiddleware might store it differently. 
+        # But deepagents BaseSkillsMiddleware might store it differently.
         # Checking base class implementation would be ideal, but assuming standard pattern:
         # We initialized super() with initial sources. If base class uses self.sources, we are good.
         # If it copies to internal storage, we might need to verify.

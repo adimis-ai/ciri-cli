@@ -11,12 +11,12 @@ def project_root(tmp_path):
     ciri_dir = tmp_path / ".ciri"
     skills_dir = ciri_dir / "skills"
     skills_dir.mkdir(parents=True)
-    
+
     # Create a skill folder
     skill1 = skills_dir / "skill1"
     skill1.mkdir()
     (skill1 / "skill.py").write_text("def run(): pass")
-    
+
     return tmp_path
 
 
@@ -30,19 +30,20 @@ async def test_skills_dynamic_scanning(project_root):
     # Note: SkillsMiddleware discovers the PATH to the skills directory, not individual skills
     discovered = sorted([Path(s).name for s in middleware.sources])
     assert "skills" in discovered
-    
+
     # Add a new skill folder in a DIFFERENT .ciri location
     # because if we add to existing project_root/.ciri/skills, the path is already in sources
     sub_project = project_root / "sub_project"
     sub_project.mkdir()
     new_skills_dir = sub_project / ".ciri" / "skills"
     new_skills_dir.mkdir(parents=True)
-    
+
     # Trigger scan via wrap call
     class MockRequest:
         pass
+
     request = MockRequest()
-    
+
     async def async_handler(r):
         return r
 

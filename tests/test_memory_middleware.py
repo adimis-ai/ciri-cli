@@ -50,11 +50,9 @@ async def test_memory_manual_sources(project_root):
     mock_backend = MagicMock()
     manual_file = project_root / "manual.md"
     manual_file.write_text("manual")
-    
+
     middleware = MemoryMiddleware(
-        backend=mock_backend, 
-        sources=[str(manual_file)], 
-        scan_root=project_root
+        backend=mock_backend, sources=[str(manual_file)], scan_root=project_root
     )
 
     # Should have manual + discovered
@@ -77,12 +75,13 @@ async def test_memory_dynamic_scanning(project_root):
     # Add a new memory file
     new_memory = project_root / ".ciri" / "memory" / "mem_new.md"
     new_memory.write_text("new memory")
-    
+
     # Trigger scan via wrap call
     class MockRequest:
         pass
+
     request = MockRequest()
-    
+
     async def async_handler(r):
         return r
 

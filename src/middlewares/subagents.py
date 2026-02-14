@@ -79,7 +79,7 @@ class SubAgentMiddleware(BaseSubAgentMiddleware):
             default_middleware=default_middleware,
             default_interrupt_on=default_interrupt_on,
             # We'll set subagents in _refresh_subagents, but need to pass something here
-            # to satisfy base init if it uses it immediately. 
+            # to satisfy base init if it uses it immediately.
             # However, we can just pass the initial list and update self.subagents later.
             subagents=self.subagents,
             system_prompt=system_prompt,
@@ -150,7 +150,9 @@ class SubAgentMiddleware(BaseSubAgentMiddleware):
 
         self.subagents = final_subagents
         self._subagents_input = final_subagents
-        logger.debug(f"Refreshed SubAgentMiddleware with {len(final_subagents)} subagents")
+        logger.debug(
+            f"Refreshed SubAgentMiddleware with {len(final_subagents)} subagents"
+        )
 
     def _discover_subagent_files(self, root: Path) -> List[Path]:
         """Recursively find all .ciri/subagents/*.{yaml,yml,json} files."""
@@ -191,17 +193,17 @@ class SubAgentMiddleware(BaseSubAgentMiddleware):
 
     def _wrap_model_call_common(self, request, handler, is_async=False):
         # We should call super().wrap_model_call but we need to ensure self.subagents is updated first
-        
+
         # The base class uses self.subagents.
         # We updated self.subagents in _refresh_subagents.
-        
+
         # We also need to update all_available_tools logic from the original wrap_model_call
         available_tools = set()
         if request.tools:
             for tool in request.tools:
                 available_tools.add(tool.name)
         self.all_available_tools.update(available_tools)
-        
+
         if is_async:
             return super().awrap_model_call(request, handler)
         else:
