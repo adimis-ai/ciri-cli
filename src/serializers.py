@@ -1,18 +1,38 @@
+import os
 import json
 import logging
 import pickle
 from pathlib import Path
 from datetime import datetime, date
+from functools import cached_property
 from typing_extensions import NotRequired, TypedDict
-from typing import Any, Dict, Optional, Union, Sequence, Literal, Tuple, Mapping
+from typing import (
+    Any,
+    Dict,
+    Optional,
+    Union,
+    Sequence,
+    Literal,
+    Tuple,
+    Mapping,
+    NotRequired,
+    List,
+)
 
+from langchain.agents import AgentState
+from langgraph.types import StateSnapshot
 from langchain_core.load import dumpd, loads
 from pydantic import BaseModel, Field, ConfigDict
 from langchain_core.messages import AnyMessage, BaseMessage
-from langgraph.types import StateSnapshot
+from langchain.chat_models import BaseChatModel, init_chat_model
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langchain.agents.middleware.shell_tool import RedactionRule
+
+from .toolkit.human_follow_up_tool import FollowUpInterruptValue
 
 logger = logging.getLogger(__name__)
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
 
 class LLMConfig(BaseModel):
     """Configuration for language models."""
@@ -186,6 +206,12 @@ class RejectDecisions(TypedDict):
 
 class ResumeCommand(TypedDict):
     resume: Union[ApprovalDecisions, EditDecisions, RejectDecisions]
+
+
+class CiriState(
+    AgentState[Any],
+):
+    __interrupt__: NotRequired[Optional[List[InterruptValue]]]
 
 
 class CiriJsonPlusSerializer(JsonPlusSerializer):
