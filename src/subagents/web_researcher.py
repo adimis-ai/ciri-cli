@@ -32,7 +32,6 @@ from ..toolkit.web_crawler_tool import (
 )
 from ..toolkit.human_follow_up_tool import follow_up_with_human
 from ..utils import (
-    _is_wsl,
     detect_browser_profiles,
     copy_browser_profile,
 )
