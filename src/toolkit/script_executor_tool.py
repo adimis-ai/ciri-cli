@@ -76,6 +76,7 @@ def build_script_executor_tool(
         "\n\nHOW TO USE:\n"
         "- List all required packages in the 'dependencies' argument.\n"
         "- Use the 'CIRI_OUTPUT_DIR' environment variable in your script to save persistent output.\n"
+        "- To use scripts from skills: Copy them from the skill directory to the necessary structure inside a temp folder, then pass that folder as 'working_dir' so they are available in the sandbox.\n"
         "- Default 'cleanup=True' removes the environment but preserves contents of 'output_dir'."
     ),
 ) -> StructuredTool:
