@@ -37,3 +37,29 @@ from langchain_core.messages import (
 # Copilot
 from .copilot import create_copilot
 from .controller import CopilotController
+from .db import CiriDatabase
+from .utils import get_app_data_dir
+
+
+class CopilotCLI:
+    def __init__(self):
+        self.db: Optional[CiriDatabase] = None
+        self.checkpointer: Optional[AsyncSqliteSaver] = None
+        self.controller: Optional[CopilotController] = None
+
+    async def setup(self):
+        db_path = get_app_data_dir() / "ciri.db"
+        
+        # Setup thread management DB
+        self.db = CiriDatabase(db_path=db_path)
+        
+        # Setup LangGraph checkpointer
+        self.checkpointer = AsyncSqliteSaver.from_conn_string(str(db_path))
+        
+        copilot = await create_copilot(
+            name="Ciri",
+            checkpointer=self.checkpointer
+        )
+
+        # Setup controller
+        self.controller = CopilotController(graph=copilot, db=self.db)

@@ -60,7 +60,7 @@ from .middlewares import (
 BASE_AGENT_PROMPT = "In order to complete the objective that the user asks of you, you have access to a number of standard tools."
 
 
-def create_copilot(
+async def create_copilot(
     # Serializable Args
     debug: bool = False,
     name: str | None = None,
@@ -126,24 +126,17 @@ def create_copilot(
             channel=effective_channel,
         )
 
+    # Await subagent builders
     subagents.extend(
         [
-            build_web_researcher_agent(
+            await build_web_researcher_agent(
                 model=model,
                 browser_name=browser_name,
                 headless=effective_headless,
                 profile_directory=browser_profile_directory,
                 crawler_browser_config=crawler_browser_config,
             ),
-            build_skill_builder_agent(
-                model=model,
-                backend=backend,
-                browser_name=browser_name,
-                headless=effective_headless,
-                profile_directory=browser_profile_directory,
-                crawler_browser_config=crawler_browser_config,
-            ),
-            build_toolkit_builder_agent(
+            await build_skill_builder_agent(
                 model=model,
                 backend=backend,
                 browser_name=browser_name,
@@ -151,7 +144,15 @@ def create_copilot(
                 profile_directory=browser_profile_directory,
                 crawler_browser_config=crawler_browser_config,
             ),
-            build_subagent_builder_agent(
+            await build_toolkit_builder_agent(
+                model=model,
+                backend=backend,
+                browser_name=browser_name,
+                headless=effective_headless,
+                profile_directory=browser_profile_directory,
+                crawler_browser_config=crawler_browser_config,
+            ),
+            await build_subagent_builder_agent(
                 model=model,
                 backend=backend,
                 browser_name=browser_name,
@@ -181,6 +182,23 @@ def create_copilot(
             "trigger": ("messages", 20),
             "keep": ("messages", 20),
         }
+
+    # Combine system_prompt with BASE_AGENT_PROMPT and PLAN_AND_RESEARCH_PROMPT
+    full_base_prompt = f"{BASE_AGENT_PROMPT}\n\n{PLAN_AND_RESEARCH_PROMPT}"
+    if system_prompt is None:
+        final_system_prompt: str | SystemMessage = full_base_prompt
+    elif isinstance(system_prompt, SystemMessage):
+        # SystemMessage: append base prompts to content
+        if isinstance(system_prompt.content, list):
+            new_content = list(system_prompt.content) + [
+                {"type": "text", "text": f"\n\n{full_base_prompt}"}
+            ]
+        else:
+            new_content = f"{system_prompt.content}\n\n{full_base_prompt}"
+        final_system_prompt = SystemMessage(content=new_content)
+    else:
+        # String: simple concatenation
+        final_system_prompt = system_prompt + "\n\n" + full_base_prompt
 
     # Pre-instantiate shared middlewares to avoid redundant rescans/syncs
     toolkit_middleware = ToolkitInjectionMiddleware()
@@ -268,23 +286,6 @@ def create_copilot(
         copilot_middleware.extend(middleware)
     if interrupt_on is not None:
         copilot_middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
-
-    # Combine system_prompt with BASE_AGENT_PROMPT and PLAN_AND_RESEARCH_PROMPT
-    full_base_prompt = f"{BASE_AGENT_PROMPT}\n\n{PLAN_AND_RESEARCH_PROMPT}"
-    if system_prompt is None:
-        final_system_prompt: str | SystemMessage = full_base_prompt
-    elif isinstance(system_prompt, SystemMessage):
-        # SystemMessage: append base prompts to content
-        if isinstance(system_prompt.content, list):
-            new_content = list(system_prompt.content) + [
-                {"type": "text", "text": f"\n\n{full_base_prompt}"}
-            ]
-        else:
-            new_content = f"{system_prompt.content}\n\n{full_base_prompt}"
-        final_system_prompt = SystemMessage(content=new_content)
-    else:
-        # String: simple concatenation
-        final_system_prompt = system_prompt + "\n\n" + full_base_prompt
 
     merged_tools = list(tools or []) + [
         build_script_executor_tool(),
