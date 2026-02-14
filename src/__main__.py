@@ -50,7 +50,7 @@ CIRI: Contextual Intelligence and Reasoning Interface
 ======================================================
 <Messages List...>
 ======================================================
-<Chat Input Box>
+<Chat Input Box / Interrupt Value>
 ```
 """
 class CopilotCLI:
