@@ -61,14 +61,23 @@ class ScriptExecutorInput(BaseModel):
 def build_script_executor_tool(
     name: str = "execute_script",
     description: str = (
-        "Create and execute a Python or JavaScript script with automatic "
-        "dependency installation, isolated environment, and cleanup. "
-        "Use this when you need to run scripts that require external packages "
-        "(pip/npm), produce output files (screenshots, data), or perform tasks "
-        "that are easier expressed as standalone scripts. "
-        "The tool creates an isolated environment (Python venv or node_modules), "
-        "installs dependencies, executes the script, and cleans up afterward. "
-        "Requires user approval before execution."
+        "Execute standalone Python or JavaScript scripts in an isolated environment. "
+        "The tool handles dependency installation (pip/npm), creates a temp workspace, "
+        "and performs cleanup by default. Requires human-in-the-loop approval. "
+        "\n\nWHEN TO USE:\n"
+        "- Complex data processing or transformation that is inefficient via multiple tool calls.\n"
+        "- Web automation tasks (e.g., using Playwright, Puppeteer) requiring custom logic.\n"
+        "- Using specialized libraries (e.g. pandas, beautifulsoup4) not available as built-in tools.\n"
+        "- Generating artifacts like CSVs, images, or JSON files that need to be preserved.\n"
+        "\n\nWHEN NOT TO USE:\n"
+        "- Simple file reads/writes, directory listings, or basic shell commands.\n"
+        "- When a more direct tool (e.g., web search, specialized API tool) is available.\n"
+        "- Tasks that can be accomplished with standard library code without external dependencies "
+        "if those dependencies are large or slow to install.\n"
+        "\n\nHOW TO USE:\n"
+        "- List all required packages in the 'dependencies' argument.\n"
+        "- Use the 'CIRI_OUTPUT_DIR' environment variable in your script to save persistent output.\n"
+        "- Default 'cleanup=True' removes the environment but preserves contents of 'output_dir'."
     ),
 ) -> StructuredTool:
     """Build a script executor tool with HITL approval via interrupt."""
