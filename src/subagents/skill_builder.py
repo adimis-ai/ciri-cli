@@ -130,7 +130,7 @@ async def build_skill_builder_agent(
         get_default_filesystem_root() / ".ciri" / "skills" / "skill-creator"
     )
 
-    # Define the Skill Builder SubAgent with skill management tools
+    # Define the Skill Builder SubAgent
     skill_builder_agent = create_deep_agent(
         model=model,
         backend=backend,
