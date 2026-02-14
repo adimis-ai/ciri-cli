@@ -1,10 +1,8 @@
-import os
 import yaml
 import json
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ValidationError, ConfigDict
-from langchain.agents.middleware import InterruptOnConfig
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any, Literal, Union
 from deepagents.middleware import (
     SubAgentMiddleware as BaseSubAgentMiddleware,
@@ -78,9 +76,6 @@ class SubAgentMiddleware(BaseSubAgentMiddleware):
             default_tools=default_tools,
             default_middleware=default_middleware,
             default_interrupt_on=default_interrupt_on,
-            # We'll set subagents in _refresh_subagents, but need to pass something here
-            # to satisfy base init if it uses it immediately.
-            # However, we can just pass the initial list and update self.subagents later.
             subagents=self.subagents,
             system_prompt=system_prompt,
             general_purpose_agent=general_purpose_agent,
