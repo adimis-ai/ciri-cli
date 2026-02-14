@@ -4,7 +4,7 @@ from .memory import MemoryMiddleware
 
 __all__ = [
     "SubAgent",
+    "MemoryMiddleware",
     "SkillsMiddleware",
     "SubAgentMiddleware",
-    "MemoryMiddleware",
 ]
