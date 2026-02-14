@@ -6,10 +6,11 @@ from deepagents import create_deep_agent, CompiledSubAgent
 from deepagents.backends.sandbox import SandboxBackendProtocol
 
 
+from ..backend import CiriBackend
 from ..utils import get_default_filesystem_root
 from ..toolkit.web_crawler_tool import BrowserConfig
 from .web_researcher import build_web_researcher_agent
-from ..backend import CiriBackend
+from ..prompts.plan_and_research import PLAN_AND_RESEARCH_PROMPT
 
 SKILL_BUILDER_SYSTEM_PROMPT = """You are the Skill Builder SubAgent, responsible for building new and managing existing skills in the .ciri/skills directory. You will use the Web Researcher SubAgent to gather information and research as needed to create and maintain skills.
 
@@ -81,7 +82,7 @@ When creating or updating skills:
 - Include comprehensive descriptions.
 - Structure markdown content with clear "When to Use" and "Instructions" sections.
 - Ensure skills are self-contained guides (Progressive Disclosure).
-"""
+""" + "\n\n" + PLAN_AND_RESEARCH_PROMPT
 
 
 
