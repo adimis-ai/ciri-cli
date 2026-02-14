@@ -3,14 +3,13 @@ from langgraph.cache.memory import InMemoryCache
 from deepagents.backends import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from deepagents import create_deep_agent, CompiledSubAgent
+from deepagents.backends.sandbox import SandboxBackendProtocol
+
 
 from ..utils import get_default_filesystem_root
 from ..toolkit.web_crawler_tool import BrowserConfig
-from ..toolkit.skill_manager_tools import (
-    SKILL_MANAGEMENT_TOOLS,
-    initialize_skill_manager,
-)
 from .web_researcher import build_web_researcher_agent
+from ..backend import CiriBackend
 
 SKILL_BUILDER_SYSTEM_PROMPT = """You are the Skill Builder SubAgent, responsible for building new and managing existing skills in the .ciri/skills directory. You will use the Web Researcher SubAgent to gather information and research as needed to create and maintain skills.
 
@@ -20,18 +19,18 @@ You MUST use the `skill-creator` skill when building new skills. This skill prov
 1.  **Correct Directory**: Skills are created in `.ciri/skills/`, which is REQUIRED for the `SkillsMiddleware` to automatically discover and load them.
 2.  **Standard Structure**: The generated `SKILL.md` and resource folders follow the required format.
 
-**NEVER create a skill manually.** Always use:
+**NEVER create a skill manually.** Always use the `execute` tool to run:
 `python3 .ciri/skills/skill-creator/scripts/init_skill.py <skill-name>`
 
 ## Your Tasks
 
 1.  **Building New Skills**:
     -   Receive user requirements.
-    -   Use `init_skill.py` to scaffold the skill.
-    -   Populate `SKILL.md` and resources based on requirements.
+    -   Use the `execute` tool to run `init_skill.py` to scaffold the skill.
+    -   Populate `SKILL.md` and resources based on requirements using `write_file` or `edit_file`.
 2.  **Managing Existing Skills**:
     -   Update skills with new information or improved functionality.
-    -   Use `upsert_skill` or file editing tools as appropriate.
+    -   Use standard file editing tools (`write_file`, `edit_file`) or shell commands (`mv`, `rm` via `execute`) as appropriate.
 3.  **Researching**:
     -   Collaborate with the Web Researcher SubAgent to gather necessary information.
 4.  **Quality Assurance**:
@@ -85,18 +84,16 @@ When creating or updating skills:
 """
 
 
+
 async def build_skill_builder_agent(
     model: BaseChatModel,
-    backend: FilesystemBackend,
+    backend: CiriBackend,
     *,
     headless: bool | None = None,
     browser_name: str | None = None,
     profile_directory: str | None = None,
     crawler_browser_config: BrowserConfig | None = None,
 ) -> CompiledSubAgent:
-    # Initialize the skill manager with the backend
-    initialize_skill_manager(backend)
-
     # Create the Web Researcher SubAgent
     web_researcher_agent = await build_web_researcher_agent(
         model=model,
@@ -117,7 +114,6 @@ async def build_skill_builder_agent(
         model=model,
         backend=backend,
         name="skill_builder_agent",
-        tools=SKILL_MANAGEMENT_TOOLS,
         subagents=[web_researcher_agent],
         system_prompt=SKILL_BUILDER_SYSTEM_PROMPT,
         skills=[skill_creator_path] if skill_creator_path.exists() else [],
