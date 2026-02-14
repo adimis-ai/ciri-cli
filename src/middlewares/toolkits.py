@@ -14,7 +14,7 @@ from ..utils import get_default_filesystem_root
 logger = logging.getLogger(__name__)
 
 
-class ToolkitInjectorMiddleware(AgentMiddleware):
+class ToolkitInjectionMiddleware(AgentMiddleware):
     """
     AgentMiddleware that discovers and injects tools from local and nested MCP toolkits.
 

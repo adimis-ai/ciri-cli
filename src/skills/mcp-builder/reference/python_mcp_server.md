@@ -44,7 +44,7 @@ The official MCP Python SDK provides FastMCP, a high-level framework for buildin
 
 ## Project Structure
 
-Create the following structure for Python MCP servers to ensure compatibility with the Ciri agent's `ToolkitInjectorMiddleware`:
+Create the following structure for Python MCP servers to ensure compatibility with the Ciri agent's `ToolkitInjectionMiddleware`:
 
 ```
 {service}_mcp/

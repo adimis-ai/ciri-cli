@@ -3,7 +3,7 @@ import asyncio
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock, call
-from src.middlewares.tookits import ToolkitInjectorMiddleware
+from src.middlewares.toolkits import ToolkitInjectionMiddleware
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ async def test_toolkit_discovery_and_injection(project_root):
     # Mock MultiServerMCPClient to avoid actual MCP server startup
     with (
         patch("subprocess.run") as mock_run,
-        patch("src.middlewares.tookits.MultiServerMCPClient") as mock_client_class,
+        patch("src.middlewares.toolkits.MultiServerMCPClient") as mock_client_class,
     ):
 
         # Setup mock client
@@ -72,7 +72,7 @@ async def test_toolkit_discovery_and_injection(project_root):
         mock_client_class.return_value = mock_client
 
         # Initialize middleware
-        middleware = ToolkitInjectorMiddleware(scan_root=project_root)
+        middleware = ToolkitInjectionMiddleware(scan_root=project_root)
 
         # Verify discovery of BOTH toolkits
         assert len(middleware._toolkit_versions) == 2
@@ -143,7 +143,7 @@ async def test_toolkit_discovery_and_injection(project_root):
 async def test_toolkit_version_change(project_root):
     with (
         patch("subprocess.run") as mock_run,
-        patch("src.middlewares.tookits.MultiServerMCPClient") as mock_client_class,
+        patch("src.middlewares.toolkits.MultiServerMCPClient") as mock_client_class,
     ):
 
         # Setup mock client
@@ -152,7 +152,7 @@ async def test_toolkit_version_change(project_root):
         mock_client_class.return_value = mock_client
 
         # Initial run
-        middleware = ToolkitInjectorMiddleware(scan_root=project_root)
+        middleware = ToolkitInjectionMiddleware(scan_root=project_root)
 
         # Reset mock calls (but versions are tracked in class var, so we need to be careful of leakage if we don't clear it or if it persists)
         # The class variable _toolkit_versions persists across instances.
@@ -168,7 +168,7 @@ dependencies = ["fastmcp"]
 """)
 
         # Second run
-        middleware2 = ToolkitInjectorMiddleware(scan_root=project_root)
+        middleware2 = ToolkitInjectionMiddleware(scan_root=project_root)
 
         # Verify sync was called again for the updated toolkit
         # We should only see calls for the updated toolkit.

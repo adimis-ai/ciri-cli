@@ -13,7 +13,7 @@ from ..utils import get_default_filesystem_root
 logger = logging.getLogger(__name__)
 
 
-class SubAgent(BaseModel):
+class SubAgentConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str = Field(..., description="Unique name for the sub-agent")
@@ -76,7 +76,7 @@ class SubAgentMiddleware(BaseSubAgentMiddleware):
             default_tools=default_tools,
             default_middleware=default_middleware,
             default_interrupt_on=default_interrupt_on,
-            subagents=subagents,
+            subagents=self.subagents,
             system_prompt=system_prompt,
             general_purpose_agent=general_purpose_agent,
             task_description=task_description,
@@ -97,8 +97,8 @@ class SubAgentMiddleware(BaseSubAgentMiddleware):
         for file_path in subagent_files:
             try:
                 subagent_data = self._load_subagent_file(file_path)
-                # Validate against SubAgent model
-                sub_agent_config = SubAgent(**subagent_data)
+                # Validate against SubAgentConfig model
+                sub_agent_config = SubAgentConfig(**subagent_data)
 
                 # Check if tools are available
                 if sub_agent_config.tools and sub_agent_config.tools != "all":
@@ -174,8 +174,6 @@ class SubAgentMiddleware(BaseSubAgentMiddleware):
             elif path.suffix == ".json":
                 return json.load(f)
             else:
-                raise ValueError(f"Unsupported file extension: {path.suffix}")
-
                 raise ValueError(f"Unsupported file extension: {path.suffix}")
 
     async def awrap_model_call(self, request, handler):

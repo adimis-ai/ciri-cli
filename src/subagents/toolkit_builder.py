@@ -29,7 +29,7 @@ You focus on creating tools that are intuitive for an AI to use, robust against 
         -   `package.json`: Must include `@modelcontextprotocol/sdk`.
         -   Entry point: Must be defined in `package.json` (usually `dist/index.js` after build).
 4.  **MIDDLEWARE COMPATIBILITY**:
-    -   Your toolkits MUST be compatible with `ToolkitInjectorMiddleware`.
+    -   Your toolkits MUST be compatible with `ToolkitInjectionMiddleware`.
     -   This means adhering strictly to the directory structure and dependency requirements above.
 5.  **NO PLACEHOLDERS**: You build working tools. If you need an API key, ask the user or use a placeholder string that is clearly marked as needing replacement (e.g., `os.getenv("API_KEY")`).
 
@@ -119,7 +119,7 @@ async def build_toolkit_builder_agent(
         description=(
             "A specialized SubAgent for creating and managing MCP toolkits (servers).\n"
             "WHEN TO USE: Invoke this agent when the user wants to 'create a toolkit', 'build an MCP server', 'integrate an API', or 'add a new tool source' that involves creating a standalone MCP server.\n"
-            "WHY: This agent knows the specific requirements for MCP servers, including `ToolkitInjectorMiddleware` compatibility, directory structure, and dependency management.\n"
+            "WHY: This agent knows the specific requirements for MCP servers, including `ToolkitInjectionMiddleware` compatibility, directory structure, and dependency management.\n"
             "HOW: Provide a clear task description like 'Create a GitHub toolkit with issue management tools' or 'Build a Stripe integration toolkit'.\n"
             "WHEN NOT TO USE: Do NOT use this for creating internal agent skills (use `skill_builder_agent`) or simple one-off scripts."
         ),

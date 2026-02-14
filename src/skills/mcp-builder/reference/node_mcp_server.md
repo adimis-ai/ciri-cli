@@ -76,7 +76,7 @@ The name should be:
 
 ## Project Structure
 
-Create the following structure for Node/TypeScript MCP servers to ensure compatibility with the Ciri agent's `ToolkitInjectorMiddleware`:
+Create the following structure for Node/TypeScript MCP servers to ensure compatibility with the Ciri agent's `ToolkitInjectionMiddleware`:
 
 ```
 {service}-mcp-server/

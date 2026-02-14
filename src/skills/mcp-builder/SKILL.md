@@ -85,7 +85,7 @@ See language-specific guides for project setup:
 
 #### 2.2 Ensure Middleware Compatibility
 
-To ensure your toolkit is automatically discovered and loaded by the `ToolkitInjectorMiddleware`:
+To ensure your toolkit is automatically discovered and loaded by the `ToolkitInjectionMiddleware`:
 
 **For Python (FastMCP):**
 *   Must use `pyproject.toml`
