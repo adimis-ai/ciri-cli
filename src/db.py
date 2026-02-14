@@ -11,7 +11,7 @@ from .utils import get_app_data_dir
 logger = logging.getLogger(__name__)
 
 
-class CiriDatabase:
+class CopilotDatabase:
     """SQLite database for CIRI persistence and thread management."""
 
     def __init__(self, db_path: Optional[Path] = None):

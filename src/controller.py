@@ -4,7 +4,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from typing import Any, Dict, List, Optional, AsyncGenerator, Union
 
-from .db import CiriDatabase
+from .db import CopilotDatabase
 from .serializers import CiriSerializer
 
 
@@ -14,13 +14,13 @@ class CopilotController:
     Separates the core logic from the user interface.
     """
 
-    def __init__(self, graph: CompiledStateGraph, db: Optional[CiriDatabase] = None):
+    def __init__(self, graph: CompiledStateGraph, db: Optional[CopilotDatabase] = None):
         """
         Initialize the controller.
 
         Args:
             graph: The compiled LangGraph instance.
-            db: The CiriDatabase instance for thread management.
+            db: The CopilotDatabase instance for thread management.
         """
         self.graph = graph
         self.db = db
