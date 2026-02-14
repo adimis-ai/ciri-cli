@@ -253,10 +253,11 @@ class TakeScreenshotTool(BaseTool):
 
 async def get_playwright_tools(
     user_data_dir: Optional[Path] = None,
-    profile_directory: str = "Default",
+    profile_directory: Optional[str] = None,
     headless: bool = False,
     channel: Optional[str] = None,
 ):
+    profile_directory = profile_directory or "Default"
     print(
         f"[get_playwright_tools] Initializing Playwright browser toolkit with profile_directory={profile_directory}, headless={headless}, channel={channel}"
     )

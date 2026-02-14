@@ -16,7 +16,6 @@ from langgraph.store.base import BaseStore
 from langgraph.errors import GraphInterrupt
 from langgraph.cache.memory import InMemoryCache
 from langgraph.store.memory import InMemoryStore
-from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import InMemorySaver
@@ -77,8 +76,10 @@ def create_copilot(
     interrupt_on: dict[str, bool | InterruptOnConfig] | None = None,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
 ) -> CompiledStateGraph:
-    if not model:
+    if model is None:
         model = init_chat_model("openai:gpt-5-mini")
+    elif isinstance(model, str):
+        model = init_chat_model(model)
 
     if not checkpointer:
         checkpointer = InMemorySaver()
@@ -129,11 +130,6 @@ def create_copilot(
         ]
     )
 
-    if model is None:
-        raise ValueError("Model must be provided")
-    elif isinstance(model, str):
-        model = init_chat_model(model)
-
     if (
         model.profile is not None
         and isinstance(model.profile, dict)
@@ -158,7 +154,6 @@ def create_copilot(
     toolkit_middleware = ToolkitInjectionMiddleware()
     shared_skills_middleware = None
     if skills is not None:
-        backend = backend if backend is not None else (lambda rt: StateBackend(rt))
         shared_skills_middleware = SkillsMiddleware(backend=backend, sources=skills)
 
     # Build middleware stack for subagents
@@ -175,8 +170,6 @@ def create_copilot(
         TodoListMiddleware(),
         toolkit_middleware,
     ]
-
-    backend = backend if backend is not None else (lambda rt: StateBackend(rt))
 
     if shared_skills_middleware:
         subagent_middleware.append(shared_skills_middleware)
@@ -221,10 +214,11 @@ def create_copilot(
             SubAgentMiddleware(
                 default_model=model,
                 default_tools=tools,
-                subagents=subagents if subagents is not None else [],
+                subagents=subagents,
                 default_middleware=subagent_middleware,
                 default_interrupt_on=interrupt_on,
                 general_purpose_agent=True,
+                system_prompt=final_system_prompt,
             ),
             SummarizationMiddleware(
                 model=model,
@@ -243,19 +237,24 @@ def create_copilot(
     if interrupt_on is not None:
         copilot_middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
 
-    # Combine system_prompt with BASE_AGENT_PROMPT
+    # Combine system_prompt with BASE_AGENT_PROMPT and PLAN_AND_RESEARCH_PROMPT
+    full_base_prompt = f"{BASE_AGENT_PROMPT}\n\n{PLAN_AND_RESEARCH_PROMPT}"
     if system_prompt is None:
-        final_system_prompt: str | SystemMessage = BASE_AGENT_PROMPT
+        final_system_prompt: str | SystemMessage = full_base_prompt
     elif isinstance(system_prompt, SystemMessage):
-        # SystemMessage: append BASE_AGENT_PROMPT to content_blocks
-        new_content = [
-            *system_prompt.content_blocks,
-            {"type": "text", "text": f"\n\n{BASE_AGENT_PROMPT}"},
-        ]
+        # SystemMessage: append base prompts to content
+        if isinstance(system_prompt.content, list):
+            new_content = list(system_prompt.content) + [
+                {"type": "text", "text": f"\n\n{full_base_prompt}"}
+            ]
+        else:
+            new_content = f"{system_prompt.content}\n\n{full_base_prompt}"
         final_system_prompt = SystemMessage(content=new_content)
     else:
         # String: simple concatenation
-        final_system_prompt = system_prompt + "\n\n" + BASE_AGENT_PROMPT
+        final_system_prompt = system_prompt + "\n\n" + full_base_prompt
+
+    merged_tools = list(tools or []) + [build_script_executor_tool(), follow_up_with_human]
 
     return create_agent(
         model,
@@ -268,9 +267,5 @@ def create_copilot(
         context_schema=context_schema,
         response_format=response_format,
         system_prompt=final_system_prompt,
-        tools=(
-            tools + [build_script_executor_tool(), follow_up_with_human]
-            if tools
-            else [build_script_executor_tool(), follow_up_with_human]
-        ),
+        tools=merged_tools,
     ).with_config({"recursion_limit": 1000})
