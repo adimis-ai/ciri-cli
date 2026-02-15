@@ -36,6 +36,7 @@ from .utils import (
     has_display,
     get_chrome_channel,
     resolve_browser_profile,
+    get_default_filesystem_root,
 )
 from .prompts import PLAN_AND_RESEARCH_PROMPT
 from .toolkit import (
@@ -201,7 +202,8 @@ async def create_copilot(
         }
 
     # Combine system_prompt with BASE_AGENT_PROMPT and PLAN_AND_RESEARCH_PROMPT
-    full_base_prompt = f"{BASE_AGENT_PROMPT}\n\n{PLAN_AND_RESEARCH_PROMPT}"
+    cwd = get_default_filesystem_root()
+    full_base_prompt = f"{BASE_AGENT_PROMPT}\n\n[CURRENT WORKING DIRECTORY]: {cwd}\n\n{PLAN_AND_RESEARCH_PROMPT}"
     if system_prompt is None:
         final_system_prompt: str | SystemMessage = full_base_prompt
     elif isinstance(system_prompt, SystemMessage):

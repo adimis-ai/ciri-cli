@@ -31,7 +31,7 @@ Filesystem tools:
 - grep(pattern)
 - execute(command)
 
-Treat the filesystem as long-term working memory.
+Treat the filesystem as long-term working memory. All filesystem tools (ls, read_file, glob, grep, etc.) operate relative to the [CURRENT WORKING DIRECTORY] provided in the prompt. NEVER use absolute paths like / or /home/user.
 
 SPECIALIZED TOOLS
 
