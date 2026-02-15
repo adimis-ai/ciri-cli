@@ -1610,6 +1610,26 @@ class CopilotCLI:
 
     # ── Interrupt Handling ────────────────────────────────────────────────
 
+    def _prompt_multiline(self, label: str, default: str = "") -> str:
+        """Prompt for input with multiline support (Alt+Enter for new line).
+
+        Uses a dedicated prompt_toolkit PromptSession that shares the same
+        key bindings as the main chat input so Alt+Enter inserts a newline
+        and Enter submits.
+        """
+        session = PromptSession(
+            key_bindings=self._create_input_key_bindings(),
+            multiline=True,
+        )
+        try:
+            result = session.prompt(
+                HTML(f"<ansicyan><b>{label}</b></ansicyan>"),
+                default=default,
+            )
+            return result
+        except (EOFError, KeyboardInterrupt):
+            return default
+
     def _handle_follow_up_interrupt(self, interrupt_value: dict) -> list:
         """Handle human_follow_up interrupt - ask user clarification questions."""
         queries = interrupt_value.get("queries", [])
@@ -1639,14 +1659,11 @@ class CopilotCLI:
                     console.print(f"    [dim]{j}.[/] {opt}")
                 console.print()
 
-                answer = Prompt.ask(
-                    "  Enter number or type your answer",
-                    console=console,
-                )
+                answer = self._prompt_multiline("  Enter number or type your answer > ")
 
                 # Resolve numbered selection
                 try:
-                    opt_idx = int(answer) - 1
+                    opt_idx = int(answer.strip()) - 1
                     if 0 <= opt_idx < len(options):
                         answer = options[opt_idx]
                 except ValueError:
@@ -1654,7 +1671,7 @@ class CopilotCLI:
 
                 responses.append(answer)
             else:
-                answer = Prompt.ask("  Your answer", console=console)
+                answer = self._prompt_multiline("  Your answer > ")
                 responses.append(answer)
 
         return responses
@@ -1697,22 +1714,13 @@ class CopilotCLI:
         )
 
         if decision in ("reject", "r"):
-            reason = Prompt.ask("  Reason (optional)", default="", console=console)
+            reason = self._prompt_multiline("  Reason (optional) > ")
             return {"status": "rejected", "reason": reason}
         elif decision in ("edit", "e"):
             console.print(
-                "  [dim]Enter the edited script (end with an empty line containing only 'EOF'):[/]"
+                "  [dim]Edit the script below (Alt+Enter for new line, Enter to submit):[/]"
             )
-            lines = []
-            while True:
-                try:
-                    line = input()
-                    if line.strip() == "EOF":
-                        break
-                    lines.append(line)
-                except EOFError:
-                    break
-            edited_script = "\n".join(lines)
+            edited_script = self._prompt_multiline("  Script > ", default=script)
             if edited_script.strip():
                 return {"status": "edited", "script_content": edited_script}
             console.print("  [yellow]Empty script, approving original.[/]")
@@ -1822,14 +1830,17 @@ class CopilotCLI:
             if decision == "approve":
                 decisions.append({"type": "approve"})
             elif decision == "reject":
-                reason = Prompt.ask("  Reason (optional)", default="", console=console)
+                reason = self._prompt_multiline("  Reason (optional) > ")
                 d = {"type": "reject"}
                 if reason:
                     d["message"] = reason
                 decisions.append(d)
             elif decision == "edit":
-                console.print("  Enter edited arguments as JSON:")
-                raw = Prompt.ask("  ", console=console)
+                console.print(
+                    "  [dim]Enter edited arguments as JSON (Alt+Enter for new line):[/]"
+                )
+                default_json = json.dumps(args, indent=2, default=str)
+                raw = self._prompt_multiline("  JSON > ", default=default_json)
                 try:
                     edited_args = json.loads(raw)
                     decisions.append(
@@ -1872,7 +1883,7 @@ class CopilotCLI:
                     padding=(0, 1),
                 )
             )
-            raw = Prompt.ask("  Respond (JSON or text)", console=console)
+            raw = self._prompt_multiline("  Respond (JSON or text) > ")
             try:
                 return json.loads(raw)
             except json.JSONDecodeError:
