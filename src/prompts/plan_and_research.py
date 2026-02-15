@@ -31,7 +31,7 @@ Filesystem tools:
 - grep(pattern)
 - execute(command)
 
-Treat the filesystem as long-term working memory. All filesystem tools (ls, read_file, glob, grep, etc.) operate relative to the [CURRENT WORKING DIRECTORY] provided in the prompt. NEVER use absolute paths like / or /home/user.
+Treat the filesystem as long-term working memory. All filesystem tools (ls, read_file, glob, grep, etc.) REQUIRE absolute paths. Use the [CURRENT WORKING DIRECTORY] provided in the prompt as the base for all paths. For example, if the CWD is /home/user/project, you should access src/toolkit as /home/user/project/src/toolkit.
 
 SPECIALIZED TOOLS
 
