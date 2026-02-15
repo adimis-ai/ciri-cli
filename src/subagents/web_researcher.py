@@ -157,10 +157,10 @@ async def get_playwright_tools(
     channel: Optional[str] = None,
 ):
     profile_directory = profile_directory or "Default"
-    print(
+    logger.debug(
         f"[get_playwright_tools] Initializing Playwright browser toolkit with profile_directory={profile_directory}, headless={headless}, channel={channel}"
     )
-    print(f"[get_playwright_tools] User data dir: {user_data_dir}")
+    logger.debug(f"[get_playwright_tools] User data dir: {user_data_dir}")
     # Chrome expects --user-data-dir=<parent> and --profile-directory=<subdir>.
     # launch_persistent_context(user_data_dir) maps to --user-data-dir, so we
     # pass the *parent* and add --profile-directory to args.
@@ -194,7 +194,7 @@ async def get_playwright_tools(
     # Add the screenshot tool
     tools.append(TakeScreenshotTool(async_browser=adapter.async_browser))
 
-    print(
+    logger.info(
         f"Initialized Playwright browser with profile at {profile_path} with tools: {[tool.name for tool in tools]}"
     )
     return tools
