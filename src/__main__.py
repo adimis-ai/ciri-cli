@@ -962,6 +962,7 @@ class CopilotCLI:
 
         while True:
             try:
+                console.print(Rule(style="dim"))
                 user_input = await self.session.prompt_async(
                     HTML("<ansicyan><b>You > </b></ansicyan>"),
                 )

@@ -208,6 +208,7 @@ async def create_copilot(
 
     # Pre-instantiate shared middlewares to avoid redundant rescans/syncs
     toolkit_middleware = ToolkitInjectionMiddleware()
+    await toolkit_middleware.refresh()
     shared_skills_middleware = None
     if skills is not None:
         shared_skills_middleware = SkillsMiddleware(backend=backend, sources=skills)

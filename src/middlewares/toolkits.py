@@ -1,3 +1,4 @@
+import os
 import tomllib
 import json
 import logging
@@ -35,11 +36,25 @@ class ToolkitInjectionMiddleware(AgentMiddleware):
         # Track state to avoid unnecessary refreshes
         self._last_toolkit_state = set()
 
-        # Initial scan and load
-        self._refresh_tools()
+    async def refresh(self, force: bool = False):
+        """Discovers and loads tools, awaiting the fetch process."""
+        await self._async_refresh_tools(force=force)
 
-    def _refresh_tools(self):
-        """Discover and load tools if toolkits have changed."""
+    def _refresh_tools(self, force: bool = False):
+        """Discover and load tools if toolkits have changed (sync wrapper)."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is already running, we can't easily wait for it synchronously
+                # but we can schedule it.
+                asyncio.ensure_future(self._async_refresh_tools(force=force))
+            else:
+                loop.run_until_complete(self._async_refresh_tools(force=force))
+        except Exception as e:
+            logger.error(f"Error refreshing toolkits (sync): {e}")
+
+    async def _async_refresh_tools(self, force: bool = False):
+        """Discover and load tools if toolkits have changed (async)."""
         try:
             # 1. Discover toolkit directories
             toolkit_dirs = self._discover_toolkits(self.root)
@@ -49,36 +64,35 @@ class ToolkitInjectionMiddleware(AgentMiddleware):
             for tk_dir in toolkit_dirs:
                 try:
                     # We read version to detect updates
-                    with open(tk_dir / "pyproject.toml", "rb") as f:
-                        data = tomllib.load(f)
-                        version = data.get("project", {}).get("version", "0.1.0")
+                    if (tk_dir / "pyproject.toml").exists():
+                        with open(tk_dir / "pyproject.toml", "rb") as f:
+                            data = tomllib.load(f)
+                            version = data.get("project", {}).get("version", "0.1.0")
+                    else:
+                        with open(tk_dir / "package.json", "r") as f:
+                            data = json.load(f)
+                            version = data.get("version", "0.1.0")
                     current_state.add((str(tk_dir.resolve()), version))
                 except Exception:
-                    # If we can't read version, include path but maybe mark as unknown version?
-                    # Or just skip optimization for this one.
                     current_state.add((str(tk_dir.resolve()), "unknown"))
 
-            if current_state == self._last_toolkit_state:
+            if not force and current_state == self._last_toolkit_state:
                 logger.debug("Toolkits unchanged, skipping refresh.")
                 return
 
             logger.info("Toolkits changed or updated. Refreshing tools...")
 
             # 3. Manage servers (sync dependencies and handle restarts on version change)
-            # Note: _sync_and_manage_servers also reads pyproject.toml and manages versions
-            # We could optimize by passing the versions we just read, but for now reuse existing method.
             self._sync_and_manage_servers(toolkit_dirs)
 
-            # 4. Initialize tools using MultiServerMCPClient
-            # synchronous wrapper for async init if event loop is not running?
-            # Existing code for _init_mcp_tools handles loop check.
-            self._init_mcp_tools(toolkit_dirs)
+            # 4. Initialize tools using MultiServerMCPClient (await it)
+            await self._init_mcp_tools_async(toolkit_dirs)
 
             # Update state only after successful init
             self._last_toolkit_state = current_state
 
         except Exception as e:
-            logger.error(f"Error refreshing toolkits: {e}")
+            logger.error(f"Error refreshing toolkits (async): {e}")
 
     def _discover_toolkits(self, root: Path) -> List[Path]:
         """Discover toolkits in .ciri/toolkits and recursively in project root."""
@@ -225,9 +239,26 @@ class ToolkitInjectionMiddleware(AgentMiddleware):
                 logger.error(f"Failed to manage toolkit server {tk_dir}: {e}")
 
     def _init_mcp_tools(self, toolkit_dirs: List[Path]):
+        """Sync wrapper for _init_mcp_tools_async."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(self._init_mcp_tools_async(toolkit_dirs))
+            else:
+                loop.run_until_complete(self._init_mcp_tools_async(toolkit_dirs))
+        except Exception as e:
+            logger.error(f"Failed to initialize MCP tools (sync): {e}")
+
+    async def _init_mcp_tools_async(self, toolkit_dirs: List[Path]):
         """Initialize MultiServerMCPClient and fetch tools from discovered toolkits."""
         if not toolkit_dirs:
             return
+
+        # Sanitize environment to avoid uv warnings and other issues
+        safe_env = {
+            k: v for k, v in os.environ.items()
+            if k not in ("VIRTUAL_ENV", "PYTHONPATH")
+        }
 
         connections = {}
         for tk_dir in toolkit_dirs:
@@ -240,18 +271,18 @@ class ToolkitInjectionMiddleware(AgentMiddleware):
                     "args": ["run", "src/main.py"],
                     "cwd": str(tk_dir),
                     "transport": "stdio",
+                    "env": {
+                        "FASTMCP_LOG_LEVEL": "WARNING",
+                        "FASTMCP_BANNER": "0",
+                        **safe_env,
+                    },
                 }
             elif (tk_dir / "package.json").exists():
                 # TypeScript / Node
-                # Try to determine entry point from package.json
                 entry_point = "dist/index.js"  # default
                 try:
                     with open(tk_dir / "package.json", "r") as f:
                         data = json.load(f)
-                        # If 'main' is specified, use it (or its built equivalent)
-                        # Standard convention in these toolkits: build -> dist/index.js
-                        # If user specifies "main": "src/index.ts", we should assume build output is referenced?
-                        # Or typically "main": "dist/index.js"
                         if "main" in data:
                             entry_point = data["main"]
                 except Exception:
@@ -262,16 +293,15 @@ class ToolkitInjectionMiddleware(AgentMiddleware):
                     "args": [entry_point],
                     "cwd": str(tk_dir),
                     "transport": "stdio",
+                    "env": {
+                        "FASTMCP_LOG_LEVEL": "WARNING",
+                        "FASTMCP_BANNER": "0",
+                        **safe_env,
+                    },
                 }
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self._async_fetch_tools(connections))
-            else:
-                loop.run_until_complete(self._async_fetch_tools(connections))
-        except Exception as e:
-            logger.error(f"Failed to initialize MCP tools: {e}")
+        if connections:
+            await self._async_fetch_tools(connections)
 
     async def _async_fetch_tools(self, connections: Dict[str, Any]):
         """Async helper to connect and fetch tools."""
