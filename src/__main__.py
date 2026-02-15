@@ -574,19 +574,21 @@ class CopilotCLI:
 
         self._render_banner()
 
-        console.print(Rule(style="dim cyan"))
-
-        # Info box: current thread + model
+        # Centered info: Model and Thread
         thread_title = self.current_thread["title"] if self.current_thread else "None"
         thread_id = self.current_thread["id"][:8] + "..." if self.current_thread else ""
+        
+        info_text = Text()
+        info_text.append("Model: ", style="bold cyan")
+        info_text.append(f"{self.selected_model}", style="white")
+        info_text.append("  ||  ", style="dim")
+        info_text.append("Selected Thread: ", style="bold cyan")
+        info_text.append(f"{thread_title} ", style="white")
+        info_text.append(f"({thread_id})", style="dim")
 
-        info_parts = [
-            f"  [bold cyan]Thread:[/] [white]{thread_title}[/] [dim]({thread_id})[/]",
-            f"  [bold cyan]Model:[/] [white]{self.selected_model}[/]",
-        ]
-        console.print(Columns(info_parts, padding=(0, 8)))
-
+        console.print(Align.center(info_text))
         console.print()
+
         self._show_commands_help()
         console.print(Rule(style="dim cyan"))
         console.print()
