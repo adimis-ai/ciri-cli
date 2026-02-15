@@ -1,10 +1,13 @@
 import os
 import sys
 import json
+import platform
+import subprocess
 import httpx
 import asyncio
 import argparse
 import aiosqlite
+from pathlib import Path
 from typing import Optional, List, Any, Dict, Union
 
 # Third-party imports
@@ -86,6 +89,114 @@ COMMANDS_HELP = {
 DEFAULT_MODEL = "openai/gpt-5-mini"
 
 console = Console()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# API Key Setup
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _persist_env_var(name: str, value: str) -> str:
+    """Persist an environment variable globally across Mac, Linux, and Windows.
+
+    Returns a human-readable message describing where the variable was saved.
+    """
+    system = platform.system()
+
+    if system == "Windows":
+        # Use setx to set a permanent user-level environment variable
+        try:
+            subprocess.run(
+                ["setx", name, value],
+                check=True,
+                capture_output=True,
+            )
+            return "Saved via [bold]setx[/] (permanent user environment variable)."
+        except Exception as e:
+            return f"[yellow]Warning:[/] Could not run setx: {e}. Variable set for this session only."
+
+    # macOS / Linux — append export to the appropriate shell profile
+    home = Path.home()
+    shell = os.environ.get("SHELL", "")
+    export_line = f'\nexport {name}="{value}"\n'
+
+    # Determine which profile files to write to
+    profiles: list[Path] = []
+    if "zsh" in shell:
+        profiles.append(home / ".zshrc")
+    elif "bash" in shell:
+        # Prefer .bash_profile on macOS, .bashrc on Linux
+        if system == "Darwin":
+            profiles.append(home / ".bash_profile")
+        else:
+            profiles.append(home / ".bashrc")
+    else:
+        # Fallback: write to .profile (POSIX standard)
+        profiles.append(home / ".profile")
+
+    written_to: list[str] = []
+    for profile in profiles:
+        try:
+            # Check if already present
+            if profile.exists():
+                content = profile.read_text()
+                if f"export {name}=" in content:
+                    # Update existing line
+                    lines = content.splitlines(keepends=True)
+                    new_lines = []
+                    for line in lines:
+                        if line.strip().startswith(f"export {name}="):
+                            new_lines.append(f'export {name}="{value}"\n')
+                        else:
+                            new_lines.append(line)
+                    profile.write_text("".join(new_lines))
+                    written_to.append(str(profile))
+                    continue
+
+            with open(profile, "a") as f:
+                f.write(export_line)
+            written_to.append(str(profile))
+        except OSError:
+            continue
+
+    if written_to:
+        files = ", ".join(f"[bold]{p}[/]" for p in written_to)
+        return f"Saved to {files}. Restart your shell or run [dim]source {written_to[0]}[/] to apply."
+    return "[yellow]Warning:[/] Could not write to any shell profile. Variable set for this session only."
+
+
+def ensure_openrouter_api_key() -> None:
+    """Check for OPENROUTER_API_KEY; prompt and persist if missing."""
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if api_key:
+        return
+
+    console.print()
+    console.print(
+        Panel(
+            "[bold yellow]OPENROUTER_API_KEY[/] is not set.\n"
+            "You need an OpenRouter API key to use CIRI.\n"
+            "Get one at [link=https://openrouter.ai/keys]https://openrouter.ai/keys[/link]",
+            title="[bold red]API Key Required[/]",
+            border_style="red",
+        )
+    )
+    console.print()
+
+    api_key = Prompt.ask("  [bold cyan]Enter your OpenRouter API key[/]").strip()
+
+    if not api_key:
+        console.print("  [bold red]No API key provided. Exiting.[/]")
+        sys.exit(1)
+
+    # Set for current process immediately
+    os.environ["OPENROUTER_API_KEY"] = api_key
+
+    # Persist globally
+    result_msg = _persist_env_var("OPENROUTER_API_KEY", api_key)
+    console.print(f"  [green]✓[/] API key set for this session.")
+    console.print(f"  [green]✓[/] {result_msg}")
+    console.print()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -436,6 +547,7 @@ class CopilotCLI:
     async def setup(self):
         """Initialize database, checkpointer, model, and controller."""
         load_all_dotenv()
+        ensure_openrouter_api_key()
 
         self._render_banner()
 
