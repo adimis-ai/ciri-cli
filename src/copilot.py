@@ -20,7 +20,6 @@ from langchain_core.messages import SystemMessage
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain.agents.structured_output import ResponseFormat
-from langchain.chat_models import BaseChatModel, init_chat_model
 from langchain.agents.middleware import AgentMiddleware, ToolRetryMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 
@@ -75,6 +74,7 @@ async def create_copilot(
     interrupt_on: dict[str, bool | InterruptOnConfig] | None = None,
     *,
     # Non-Serializable Args
+    all_allowed: bool = False,
     cache: BaseCache | None = None,
     store: BaseStore | None = None,
     backend: CiriBackend | None = None,
@@ -90,6 +90,12 @@ async def create_copilot(
 
     model = llm_config.init_langchain_model()
 
+    if interrupt_on is None and not all_allowed:
+        interrupt_on = {
+            "execute": True,
+            "edit_file": True,
+            "write_file": True,
+        }
     if not checkpointer:
         checkpointer = InMemorySaver()
     if not store:
@@ -129,6 +135,7 @@ async def create_copilot(
     # Build web researcher once and share across subagent builders
     web_researcher = await build_web_researcher_agent(
         model=model,
+        all_allowed=all_allowed,
         browser_name=browser_name,
         headless=effective_headless,
         profile_directory=browser_profile_directory,
@@ -142,6 +149,7 @@ async def create_copilot(
             await build_skill_builder_agent(
                 model=model,
                 backend=backend,
+                all_allowed=all_allowed,
                 browser_name=browser_name,
                 headless=effective_headless,
                 profile_directory=browser_profile_directory,
@@ -151,6 +159,7 @@ async def create_copilot(
             await build_toolkit_builder_agent(
                 model=model,
                 backend=backend,
+                all_allowed=all_allowed,
                 browser_name=browser_name,
                 headless=effective_headless,
                 profile_directory=browser_profile_directory,
@@ -160,6 +169,7 @@ async def create_copilot(
             await build_subagent_builder_agent(
                 model=model,
                 backend=backend,
+                all_allowed=all_allowed,
                 browser_name=browser_name,
                 headless=effective_headless,
                 profile_directory=browser_profile_directory,

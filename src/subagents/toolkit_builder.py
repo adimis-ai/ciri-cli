@@ -69,6 +69,7 @@ You are the bridge between the agent and the world. Build strong bridges.
 async def build_toolkit_builder_agent(
     model: BaseChatModel,
     backend: CiriBackend,
+    all_allowed: bool = False,
     browser_name: Optional[str] = None,
     profile_directory: Optional[str] = None,
     headless: Optional[bool] = None,
@@ -80,6 +81,7 @@ async def build_toolkit_builder_agent(
         web_researcher_agent = await build_web_researcher_agent(
             model=model,
             headless=headless,
+            all_allowed=all_allowed,
             browser_name=browser_name,
             profile_directory=profile_directory,
             crawler_browser_config=crawler_browser_config,
@@ -91,11 +93,22 @@ async def build_toolkit_builder_agent(
         get_default_filesystem_root() / ".ciri" / "skills" / "mcp-builder"
     )
 
+
+    interrupt_on = None
+    if not all_allowed:
+        interrupt_on = {
+            "execute": True,
+            "edit_file": True,
+            "write_file": True,
+        }
+        
+        
     # Define the Toolkit Builder SubAgent
     toolkit_builder_agent = create_deep_agent(
         model=model,
         backend=backend,
         cache=InMemoryCache(),
+        interrupt_on=interrupt_on,
         name="toolkit_builder_agent",
         subagents=[web_researcher_agent],
         system_prompt=TOOLKIT_BUILDER_SYSTEM_PROMPT,

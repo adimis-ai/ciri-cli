@@ -19,13 +19,12 @@ from langchain.agents.middleware import (
     TodoListMiddleware,
     ToolRetryMiddleware,
     SummarizationMiddleware,
+    HumanInTheLoopMiddleware,
 )
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser as AsyncBrowser
-    from playwright.async_api import Page as AsyncPage
     from playwright.sync_api import Browser as SyncBrowser
-    from playwright.sync_api import Page as SyncPage
 
 from ..toolkit.web_crawler_tool import (
     build_web_crawler_tool,
@@ -33,13 +32,7 @@ from ..toolkit.web_crawler_tool import (
     BrowserConfig as CrawlerBrowserConfig,
 )
 from ..toolkit.human_follow_up_tool import follow_up_with_human
-from ..utils import (
-    has_display,
-    get_chrome_channel,
-    resolve_browser_profile,
-    detect_browser_profiles,
-    copy_browser_profile,
-)
+from ..utils import has_display, get_chrome_channel, resolve_browser_profile
 
 logger = logging.getLogger(__name__)
 
@@ -463,6 +456,7 @@ async def build_web_researcher_agent(
     profile_directory: Optional[str] = None,
     headless: Optional[bool] = None,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
+    all_allowed: bool = False,
 ) -> CompiledSubAgent:
     """Build a web-researcher sub-agent with real-browser anti-detection.
 
@@ -493,6 +487,8 @@ async def build_web_researcher_agent(
             display availability when ``None``.
         crawler_browser_config: Custom ``crawl4ai.BrowserConfig``.  Built
             automatically when ``None``.
+        all_allowed: If ``True``, all tool calls are auto-approved. If ``False``,
+            certain tools require human approval via ``HumanInTheLoopMiddleware``.
     """
     # --- resolve profile & channel once, share across both browsers ---
     # NOTE: In create_copilot, we resolve profile_info and crawler_browser_config.
@@ -531,25 +527,40 @@ async def build_web_researcher_agent(
     tools.append(follow_up_with_human)
 
     # --- assemble agent ---
+    middleware = [
+        TodoListMiddleware(),
+        SummarizationMiddleware(model=model),
+        ToolRetryMiddleware(
+            max_retries=2,
+            retry_on=lambda exc: not isinstance(exc, GraphInterrupt),
+            on_failure="continue",
+            backoff_factor=2.0,
+            initial_delay=1.0,
+            max_delay=10.0,
+            jitter=True,
+        ),
+    ]
+
+    if not all_allowed:
+        middleware.append(
+            HumanInTheLoopMiddleware(
+                interrupt_on={
+                    "navigate_browser": True,
+                    "click_element": True,
+                    "web_crawler": True,
+                    "simple_web_search": True,
+                    "take_screenshot": True,
+                }
+            )
+        )
+
     agent = create_agent(
         model=model,
         tools=tools,
         cache=InMemoryCache(),
         name="web_research_agent",
         system_prompt=WEB_RESEARCHER_SYSTEM_PROMPT,
-        middleware=[
-            TodoListMiddleware(),
-            SummarizationMiddleware(model=model),
-            ToolRetryMiddleware(
-                max_retries=2,
-                retry_on=lambda exc: not isinstance(exc, GraphInterrupt),
-                on_failure="continue",
-                backoff_factor=2.0,
-                initial_delay=1.0,
-                max_delay=10.0,
-                jitter=True,
-            ),
-        ],
+        middleware=middleware,
     )
 
     return CompiledSubAgent(

@@ -118,6 +118,7 @@ class InjectAvailableToolNamesMiddleware(AgentMiddleware):
 async def build_subagent_builder_agent(
     model: BaseChatModel,
     backend: CiriBackend,
+    all_allowed: bool = False,
     browser_name: Optional[str] = None,
     profile_directory: Optional[str] = None,
     headless: Optional[bool] = None,
@@ -129,6 +130,7 @@ async def build_subagent_builder_agent(
         web_researcher_agent = await build_web_researcher_agent(
             model=model,
             headless=headless,
+            all_allowed=all_allowed,
             browser_name=browser_name,
             profile_directory=profile_directory,
             crawler_browser_config=crawler_browser_config,
@@ -144,13 +146,28 @@ async def build_subagent_builder_agent(
         get_default_filesystem_root() / ".ciri" / "skills" / "skill-creator"
     )
 
+
+    interrupt_on = None
+    if not all_allowed:
+        interrupt_on = {
+            "execute": True,
+            "edit_file": True,
+            "write_file": True,
+        }
+        
     # Define the SubAgent Builder SubAgent
     subagent_builder_agent = create_deep_agent(
         model=model,
         backend=backend,
         cache=InMemoryCache(),
+        interrupt_on=interrupt_on,
         name="subagent_builder_agent",
         subagents=[web_researcher_agent],
+        interrupt_on={
+            "execute": True,
+            "edit_file": True,
+            "write_file": True,
+        },
         system_prompt=SUBAGENT_BUILDER_SYSTEM_PROMPT,
         tools=[build_script_executor_tool(), follow_up_with_human],
         skills=[p for p in [subagent_builder_path, skill_creator_path] if p.exists()],
