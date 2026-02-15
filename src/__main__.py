@@ -684,7 +684,7 @@ class CopilotCLI:
         console.print(f"[bold magenta]System >[/] [dim italic]{content}[/]")
 
     @staticmethod
-    def _render_summary_panel(text: str, title: str = "💭 Summarization"):
+    def _render_summary_panel(text: str, title: str = "💭 Thought"):
         """Render a summarization or reasoning block in a beautiful Panel."""
         if not text.strip():
             return
@@ -734,7 +734,7 @@ class CopilotCLI:
                     # Some models use 'summary' directly
                     text_content = block.get("text", "")
                     if text_content.strip():
-                        CopilotCLI._render_summary_panel(text_content, title="Summary")
+                        CopilotCLI._render_summary_panel(text_content, title="Thought")
 
     async def _render_existing_messages(self):
         """Fetch and render existing messages for the current thread."""
