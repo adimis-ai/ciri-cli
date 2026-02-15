@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import platform
 import subprocess
 import httpx
@@ -29,6 +30,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.key_binding import KeyBindings
 
 # LangGraph / LangChain imports
 from langgraph.types import Command, Interrupt
@@ -417,6 +419,33 @@ class CiriCompleter(Completer):
 
 
 class CopilotCLI:
+    # Seconds within which a second Ctrl+C terminates the session
+    _DOUBLE_CTRL_C_THRESHOLD = 1.5
+
+    @staticmethod
+    def _create_input_key_bindings() -> KeyBindings:
+        """Create key bindings for the chat input.
+
+        - Enter           → submit the input
+        - Escape+Enter    → insert a newline  (Alt+Enter on most terminals)
+
+        Note: Ctrl+Enter may or may not send a distinct sequence depending on
+        the terminal emulator.  In terminals that use the Kitty keyboard
+        protocol or xterm modifyOtherKeys, it works.  Otherwise Alt+Enter
+        (or Escape then Enter) is the reliable alternative.
+        """
+        kb = KeyBindings()
+
+        @kb.add("enter")
+        def _submit(event):
+            event.current_buffer.validate_and_handle()
+
+        @kb.add("escape", "enter")  # Alt+Enter / Escape then Enter
+        def _newline(event):
+            event.current_buffer.insert_text("\n")
+
+        return kb
+
     def __init__(self, all_allowed: bool = False):
         self.all_allowed = all_allowed
         self.db: Optional[CopilotDatabase] = None
@@ -430,8 +459,12 @@ class CopilotCLI:
         self.session = PromptSession(
             completer=self.completer,
             history=self.input_history,
+            key_bindings=self._create_input_key_bindings(),
+            multiline=True,
         )
         self.is_new_thread = False  # Track if the current thread needs a title
+        self._last_ctrl_c_time: float = 0.0  # For double Ctrl+C detection
+        self._streaming = False  # True while streaming a response
         self.settings = load_settings()
         self.selected_model = self.settings.get("model", DEFAULT_MODEL)
         self.selected_browser_profile = self.settings.get("browser_profile")
@@ -2019,9 +2052,21 @@ class CopilotCLI:
                     HTML("<ansibrightgreen><b>You > </b></ansibrightgreen>"),
                 )
                 user_input = user_input.strip()
-            except (EOFError, KeyboardInterrupt):
+                self._last_ctrl_c_time = 0.0  # Reset on successful input
+            except EOFError:
                 console.print("\n  [dim]Goodbye![/]")
                 break
+            except KeyboardInterrupt:
+                now = time.monotonic()
+                if now - self._last_ctrl_c_time < self._DOUBLE_CTRL_C_THRESHOLD:
+                    # Double Ctrl+C → terminate
+                    console.print("\n  [dim]Goodbye![/]")
+                    break
+                self._last_ctrl_c_time = now
+                console.print(
+                    "\n  [dim]Press Ctrl+C again to exit.[/]"
+                )
+                continue
 
             if not user_input:
                 continue
@@ -2077,13 +2122,18 @@ class CopilotCLI:
                 console.print()
 
             try:
+                self._streaming = True
                 await self._stream_response(
                     {"messages": [HumanMessage(content=user_input)]}
                 )
             except KeyboardInterrupt:
+                # Single Ctrl+C during streaming → stop and return to prompt
+                self._last_ctrl_c_time = time.monotonic()
                 console.print("\n  [yellow]Interrupted.[/]")
             except Exception as e:
                 console.print(f"\n  [bold red]Error:[/] {e}")
+            finally:
+                self._streaming = False
 
             console.print()
 
