@@ -83,14 +83,25 @@ class PlaywrightBrowserInit:
 
     async def get_async_browser(self) -> "AsyncBrowser":
         if self._browser is None:
-            from playwright.async_api import async_playwright
+            from playwright.async_api import async_playwright, Error
 
-            self._pw = await async_playwright().start()
-            self._browser = (
-                await self._pw.chromium.launch_persistent_context(
-                    self.profile_path, **self.launch_kwargs
-                )
-            ).browser
+            try:
+                self._pw = await async_playwright().start()
+                self._browser = (
+                    await self._pw.chromium.launch_persistent_context(
+                        self.profile_path, **self.launch_kwargs
+                    )
+                ).browser
+            except Error as e:
+                error_msg = str(e)
+                if "error while loading shared libraries" in error_msg or "libnspr4.so" in error_msg or "Target closed" in error_msg:
+                    logger.error("Playwright failed to launch. Likely missing system dependencies or restricted environment.")
+                    raise RuntimeError(
+                        "Playwright failed to launch. If you are on Linux, please ensure system dependencies are installed "
+                        "by running 'playwright install-deps'. "
+                        f"Original error: {error_msg}"
+                    ) from e
+                raise
         return self._browser
 
 

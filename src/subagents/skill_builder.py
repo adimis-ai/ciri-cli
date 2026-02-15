@@ -113,15 +113,17 @@ async def build_skill_builder_agent(
     profile_directory: Optional[str] = None,
     headless: Optional[bool] = None,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
+    web_researcher_agent: Optional[CompiledSubAgent] = None,
 ) -> CompiledSubAgent:
-    # Create the Web Researcher SubAgent
-    web_researcher_agent = await build_web_researcher_agent(
-        model=model,
-        headless=headless,
-        browser_name=browser_name,
-        profile_directory=profile_directory,
-        crawler_browser_config=crawler_browser_config,
-    )
+    # Create the Web Researcher SubAgent (or reuse pre-built one)
+    if web_researcher_agent is None:
+        web_researcher_agent = await build_web_researcher_agent(
+            model=model,
+            headless=headless,
+            browser_name=browser_name,
+            profile_directory=profile_directory,
+            crawler_browser_config=crawler_browser_config,
+        )
 
     # Path to the skill-creator skill
     # We use get_default_filesystem_root() to ensure we find the project root correctly

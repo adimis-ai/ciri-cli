@@ -126,16 +126,19 @@ async def create_copilot(
             channel=effective_channel,
         )
 
-    # Await subagent builders
+    # Build web researcher once and share across subagent builders
+    web_researcher = await build_web_researcher_agent(
+        model=model,
+        browser_name=browser_name,
+        headless=effective_headless,
+        profile_directory=browser_profile_directory,
+        crawler_browser_config=crawler_browser_config,
+    )
+
+    # Await subagent builders, passing the shared web_researcher
     subagents.extend(
         [
-            await build_web_researcher_agent(
-                model=model,
-                browser_name=browser_name,
-                headless=effective_headless,
-                profile_directory=browser_profile_directory,
-                crawler_browser_config=crawler_browser_config,
-            ),
+            web_researcher,
             await build_skill_builder_agent(
                 model=model,
                 backend=backend,
@@ -143,6 +146,7 @@ async def create_copilot(
                 headless=effective_headless,
                 profile_directory=browser_profile_directory,
                 crawler_browser_config=crawler_browser_config,
+                web_researcher_agent=web_researcher,
             ),
             await build_toolkit_builder_agent(
                 model=model,
@@ -151,6 +155,7 @@ async def create_copilot(
                 headless=effective_headless,
                 profile_directory=browser_profile_directory,
                 crawler_browser_config=crawler_browser_config,
+                web_researcher_agent=web_researcher,
             ),
             await build_subagent_builder_agent(
                 model=model,
@@ -159,6 +164,7 @@ async def create_copilot(
                 headless=effective_headless,
                 profile_directory=browser_profile_directory,
                 crawler_browser_config=crawler_browser_config,
+                web_researcher_agent=web_researcher,
             ),
         ]
     )
