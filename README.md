@@ -140,7 +140,7 @@ Option 3 — Remote / Private Repo (One-command install):
 If you want to install `ciri` on another machine without making the repo public, you can use `uv` with a GitHub Personal Access Token (PAT):
 
 ```bash
-uv tool install git+https://<YOUR_PAT>@github.com/adimis-ai/ciri-cli-v1.git
+uv tool install git+https://<YOUR_PAT>@github.com/adimis-ai/ciri.git
 ```
 
 ---
