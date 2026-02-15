@@ -50,6 +50,8 @@ from .utils import (
     list_skills,
     list_toolkits,
     list_subagents,
+    load_settings,
+    save_settings,
 )
 from .copilot import create_copilot
 from .controller import CopilotController
@@ -75,6 +77,7 @@ COMMANDS_HELP = {
     "/switch-thread": "Switch to a different thread",
     "/delete-thread": "Delete a thread",
     "/change-model": "Change the active LLM model",
+    "/change-browser-profile": "Change the default browser profile",
     "/threads": "List all threads",
     "/help": "Show this help message",
     "/exit": "Exit CIRI",
@@ -299,6 +302,9 @@ class CopilotCLI:
             history=self.input_history,
         )
         self.is_new_thread = False  # Track if the current thread needs a title
+        self.settings = load_settings()
+        self.selected_model = self.settings.get("model", DEFAULT_MODEL)
+        self.selected_browser_profile = self.settings.get("browser_profile")
 
     # ── Banner ────────────────────────────────────────────────────────────
 
@@ -434,11 +440,17 @@ class CopilotCLI:
         self._render_banner()
 
         # ── Model selection ──
-        self.selected_model = await self._select_model()
+        if "model" not in self.settings:
+            self.selected_model = await self._select_model()
+            self.settings["model"] = self.selected_model
+            save_settings(self.settings)
         console.print()
 
         # ── Browser profile selection ──
-        self.selected_browser_profile = await self._select_browser_profile()
+        if "browser_profile" not in self.settings:
+            self.selected_browser_profile = await self._select_browser_profile()
+            self.settings["browser_profile"] = self.selected_browser_profile
+            save_settings(self.settings)
         console.print()
 
         # ── Setup Flow ──
@@ -494,11 +506,20 @@ class CopilotCLI:
 
         # 5. Thread
         with console.status("[cyan]Resuming conversation...[/]", spinner="dots"):
-            threads = self.controller.list_threads()
-            if threads:
-                self.current_thread = threads[0]  # most recently updated
-            else:
-                self.current_thread = self.controller.create_thread()
+            last_thread_id = self.settings.get("thread_id")
+            if last_thread_id:
+                self.current_thread = self.controller.get_thread(last_thread_id)
+            
+            if not self.current_thread:
+                threads = self.controller.list_threads()
+                if threads:
+                    self.current_thread = threads[0]  # most recently updated
+                else:
+                    self.current_thread = self.controller.create_thread()
+
+            if self.current_thread:
+                self.settings["thread_id"] = self.current_thread["id"]
+                save_settings(self.settings)
 
         thread_title = self.current_thread["title"]
         thread_id = self.current_thread["id"][:8] + "..."
@@ -577,6 +598,9 @@ class CopilotCLI:
         """Create a new thread without prompting for a title."""
         self.current_thread = self.controller.create_thread()
         self.is_new_thread = True
+        
+        self.settings["thread_id"] = self.current_thread["id"]
+        save_settings(self.settings)
 
         # Clear terminal and render post-setup screen
         self._render_post_setup_screen()
@@ -622,6 +646,9 @@ class CopilotCLI:
             if 0 <= idx < len(threads):
                 self.current_thread = threads[idx]
                 self.controller.touch_thread(self.current_thread["id"])
+                
+                self.settings["thread_id"] = self.current_thread["id"]
+                save_settings(self.settings)
 
                 # Clear terminal and render post-setup screen
                 self._render_post_setup_screen()
@@ -672,6 +699,8 @@ class CopilotCLI:
                         remaining = self.controller.list_threads()
                         if remaining:
                             self.current_thread = remaining[0]
+                            self.settings["thread_id"] = self.current_thread["id"]
+                            save_settings(self.settings)
                             self._render_post_setup_screen()
                             console.print(
                                 f"  [green]✓[/] Switched to: [bold]{self.current_thread['title']}[/]"
@@ -680,6 +709,8 @@ class CopilotCLI:
                             await self._render_existing_messages()
                         else:
                             self.current_thread = self.controller.create_thread()
+                            self.settings["thread_id"] = self.current_thread["id"]
+                            save_settings(self.settings)
                             self._render_post_setup_screen()
                             console.print("  [green]✓[/] Created new thread")
                             console.print()
@@ -734,6 +765,8 @@ class CopilotCLI:
         new_model = await self._select_model()
         if new_model != self.selected_model:
             self.selected_model = new_model
+            self.settings["model"] = new_model
+            save_settings(self.settings)
             console.print(f"  [green]Model set to:[/] [bold]{self.selected_model}[/]")
             console.print(
                 "  [yellow]The new model will take effect on the next agent rebuild.[/]"
@@ -743,6 +776,32 @@ class CopilotCLI:
             )
         else:
             console.print("  [dim]Model unchanged.[/]")
+
+    async def _cmd_change_browser_profile(self):
+        """Change the default browser profile (requires agent rebuild)."""
+        console.print(
+            "  [yellow]Note: Changing the browser profile requires rebuilding the agent.[/]"
+        )
+        new_profile = await self._select_browser_profile()
+        # Even if new_profile is None (skipped), we save it if it changed
+        if new_profile != self.selected_browser_profile:
+            self.selected_browser_profile = new_profile
+            self.settings["browser_profile"] = new_profile
+            save_settings(self.settings)
+            if new_profile:
+                console.print(
+                    f"  [green]Browser profile set to:[/] [bold]{new_profile['browser']}[/] - {new_profile['display_name']}"
+                )
+            else:
+                console.print("  [green]Browser profile cleared.[/]")
+            console.print(
+                "  [yellow]The new browser profile will take effect on the next agent rebuild.[/]"
+            )
+            console.print(
+                "  [dim]Tip: Use /new-thread or restart CIRI to rebuild with the new profile.[/]"
+            )
+        else:
+            console.print("  [dim]Browser profile unchanged.[/]")
 
     # ── Message Rendering ─────────────────────────────────────────────────
 
@@ -1721,6 +1780,8 @@ class CopilotCLI:
                     self._cmd_list_threads()
                 elif cmd == "/change-model":
                     await self._cmd_change_model()
+                elif cmd == "/change-browser-profile":
+                    await self._cmd_change_browser_profile()
                 else:
                     console.print(
                         f"  [yellow]Unknown command: {cmd}[/]. Type /help for available commands."

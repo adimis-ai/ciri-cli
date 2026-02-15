@@ -10,6 +10,37 @@ from pathlib import Path
 from typing import Optional, List, Tuple, Any
 from dotenv import load_dotenv, set_key
 
+# ---------------------------------------------------------------------------
+# Settings Persistence
+# ---------------------------------------------------------------------------
+
+def get_settings_path() -> Path:
+    """Return the path to the project-local settings.json file."""
+    return get_default_filesystem_root() / ".ciri" / "settings.json"
+
+
+def load_settings() -> dict:
+    """Load settings from the project-local settings.json file."""
+    path = get_settings_path()
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Failed to load settings from {path}: {e}")
+    return {}
+
+
+def save_settings(settings: dict):
+    """Save settings to the project-local settings.json file."""
+    path = get_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=4)
+    except OSError as e:
+        logger.error(f"Failed to save settings to {path}: {e}")
+
 try:
     import pathspec
 except ImportError:
