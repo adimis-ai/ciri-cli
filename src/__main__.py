@@ -6,6 +6,7 @@ import httpx
 import asyncio
 import aiosqlite
 import subprocess
+import argparse
 from pathlib import Path
 from typing import Optional, List, Any, Dict, Union
 
@@ -84,7 +85,7 @@ COMMANDS_HELP = {
     "/exit": "Exit CIRI",
 }
 
-DEFAULT_MODEL = "deepseek/deepseek-v3.2"
+DEFAULT_MODEL = "openai/gpt-5-mini"
 
 console = Console()
 
@@ -288,7 +289,8 @@ class CiriCompleter(Completer):
 
 
 class CopilotCLI:
-    def __init__(self):
+    def __init__(self, all_allowed: bool = False):
+        self.all_allowed = all_allowed
         self.db: Optional[CopilotDatabase] = None
         self.checkpointer: Optional[AsyncSqliteSaver] = None
         self.controller: Optional[CopilotController] = None
@@ -485,6 +487,7 @@ class CopilotCLI:
                 name="Ciri",
                 llm_config=llm_config,
                 checkpointer=self.checkpointer,
+                all_allowed=self.all_allowed,
                 **browser_kwargs,
             )
         console.print("  [green]✓[/] Copilot agent built")
@@ -1416,7 +1419,15 @@ class CopilotCLI:
 
 def main():
     """Entry point for the CIRI CLI."""
-    cli = CopilotCLI()
+    parser = argparse.ArgumentParser(description="CIRI - Contextual Intelligence and Reasoning Interface")
+    parser.add_argument(
+        "--all-allowed",
+        action="store_true",
+        help="Pass all_allowed=True to the copilot (disables some interrupts)",
+    )
+    args = parser.parse_args()
+
+    cli = CopilotCLI(all_allowed=args.all_allowed)
     try:
         asyncio.run(cli.run())
     except KeyboardInterrupt:

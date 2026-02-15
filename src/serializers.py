@@ -38,7 +38,7 @@ class LLMConfig(BaseModel):
     """Configuration for language models."""
 
     model: str = Field(
-        description="The language model to use, e.g. 'deepseek/deepseek-v3.2' or 'openai:gpt-4'."
+        description="The language model to use, e.g. 'openai/gpt-5-mini' or 'openai:gpt-4'."
     )
     model_kwargs: Dict[str, Any] = Field(default_factory=dict)
 
