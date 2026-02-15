@@ -86,7 +86,7 @@ async def create_copilot(
     tools: Sequence[BaseTool | Callable | dict[str, Any]] | None = None,
 ) -> CompiledStateGraph:
     if llm_config is None:
-        llm_config = LLMConfig(model="openai/gpt-5-mini")
+        llm_config = LLMConfig(model="openai/gpt-oss-120b:free")
 
     model = llm_config.init_langchain_model()
 

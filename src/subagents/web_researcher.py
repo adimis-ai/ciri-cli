@@ -94,8 +94,14 @@ class PlaywrightBrowserInit:
                 ).browser
             except Error as e:
                 error_msg = str(e)
-                if "error while loading shared libraries" in error_msg or "libnspr4.so" in error_msg or "Target closed" in error_msg:
-                    logger.error("Playwright failed to launch. Likely missing system dependencies or restricted environment.")
+                if (
+                    "error while loading shared libraries" in error_msg
+                    or "libnspr4.so" in error_msg
+                    or "Target closed" in error_msg
+                ):
+                    logger.error(
+                        "Playwright failed to launch. Likely missing system dependencies or restricted environment."
+                    )
                     raise RuntimeError(
                         "Playwright failed to launch. If you are on Linux, please ensure system dependencies are installed "
                         "by running 'playwright install-deps'. "

@@ -256,7 +256,8 @@ class ToolkitInjectionMiddleware(AgentMiddleware):
 
         # Sanitize environment to avoid uv warnings and other issues
         safe_env = {
-            k: v for k, v in os.environ.items()
+            k: v
+            for k, v in os.environ.items()
             if k not in ("VIRTUAL_ENV", "PYTHONPATH")
         }
 

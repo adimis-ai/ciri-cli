@@ -44,7 +44,17 @@ from langchain_core.messages import (
 
 # Copilot
 from .db import CopilotDatabase
-from .utils import get_app_data_dir, detect_browser_profiles, load_all_dotenv
+from .utils import (
+    get_app_data_dir,
+    detect_browser_profiles,
+    load_all_dotenv,
+    get_default_filesystem_root,
+    list_files_with_gitignore,
+    list_folders_with_gitignore,
+    list_skills,
+    list_toolkits,
+    list_subagents,
+)
 from .copilot import create_copilot
 from .controller import CopilotController
 from .serializers import LLMConfig
@@ -74,7 +84,7 @@ COMMANDS_HELP = {
     "/exit": "Exit CIRI",
 }
 
-DEFAULT_MODEL = "openai/gpt-5-mini"
+DEFAULT_MODEL = "openai/gpt-oss-120b:free"
 
 console = Console()
 
@@ -92,7 +102,9 @@ def _get_models_from_env() -> List[str]:
     try:
         models = json.loads(raw)
         if isinstance(models, list):
-            return [m if isinstance(m, str) else m.get("model_name", str(m)) for m in models]
+            return [
+                m if isinstance(m, str) else m.get("model_name", str(m)) for m in models
+            ]
     except json.JSONDecodeError:
         # Try comma-separated
         return [m.strip() for m in raw.split(",") if m.strip()]
@@ -178,17 +190,96 @@ class ModelCompleter(Completer):
 
 
 class CiriCompleter(Completer):
-    """Autocomplete for /commands."""
+    """Autocomplete for /commands and @ triggers (files, folders, skills, toolkits, subagents)."""
 
     def __init__(self):
         self.commands = list(COMMANDS_HELP.keys())
+        self.root = get_default_filesystem_root()
 
     def get_completions(self, document: Document, complete_event):
         text = document.text_before_cursor
+
+        # Handle /commands
         if text.startswith("/"):
             for cmd in self.commands:
                 if cmd.startswith(text):
                     yield Completion(cmd, start_position=-len(text))
+            return
+
+        # Handle @files: trigger
+        if "@files:" in text:
+            prefix = text.split("@files:")[-1]
+            try:
+                files = list_files_with_gitignore(self.root, prefix)
+                for file in files[:50]:  # Limit to 50 results
+                    yield Completion(
+                        file,
+                        start_position=-len(prefix),
+                        display=f"📄 {file}",
+                    )
+            except Exception:
+                pass
+            return
+
+        # Handle @folders: trigger
+        if "@folders:" in text:
+            prefix = text.split("@folders:")[-1]
+            try:
+                folders = list_folders_with_gitignore(self.root, prefix)
+                for folder in folders[:50]:  # Limit to 50 results
+                    yield Completion(
+                        folder,
+                        start_position=-len(prefix),
+                        display=f"📁 {folder}",
+                    )
+            except Exception:
+                pass
+            return
+
+        # Handle @skills: trigger
+        if "@skills:" in text:
+            prefix = text.split("@skills:")[-1]
+            try:
+                skills = list_skills(self.root, prefix)
+                for skill in skills:
+                    yield Completion(
+                        skill,
+                        start_position=-len(prefix),
+                        display=f"⚡ {skill}",
+                    )
+            except Exception:
+                pass
+            return
+
+        # Handle @toolkits: trigger
+        if "@toolkits:" in text:
+            prefix = text.split("@toolkits:")[-1]
+            try:
+                toolkits = list_toolkits(self.root, prefix)
+                for toolkit in toolkits:
+                    yield Completion(
+                        toolkit,
+                        start_position=-len(prefix),
+                        display=f"🔧 {toolkit}",
+                    )
+            except Exception:
+                pass
+            return
+
+        # Handle @subagents: trigger
+        if "@subagents:" in text:
+            prefix = text.split("@subagents:")[-1]
+            try:
+                subagents = list_subagents(self.root, prefix)
+                for subagent in subagents:
+                    yield Completion(
+                        subagent,
+                        start_position=-len(prefix),
+                        display=f"🤖 {subagent}",
+                    )
+            except Exception:
+                pass
+            return
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -286,7 +377,9 @@ class CopilotCLI:
             profiles = detect_browser_profiles()
 
         if not profiles:
-            console.print("  [yellow]No browser profiles detected.[/] Continuing without one.")
+            console.print(
+                "  [yellow]No browser profiles detected.[/] Continuing without one."
+            )
             console.print()
             return None
 
@@ -304,7 +397,9 @@ class CopilotCLI:
         table.add_column("Name", style="bright_white")
 
         for i, p in enumerate(profiles, 1):
-            table.add_row(str(i), p["browser"], p["profile_directory"], p["display_name"])
+            table.add_row(
+                str(i), p["browser"], p["profile_directory"], p["display_name"]
+            )
 
         console.print(table)
         console.print()
@@ -368,17 +463,22 @@ class CopilotCLI:
         console.print("  [green]✓[/] Checkpointer ready")
 
         # 3. Create Copilot (Agent Building)
-        with console.status("[cyan]Building copilot agent (this may take a moment)...[/]", spinner="dots"):
+        with console.status(
+            "[cyan]Building copilot agent (this may take a moment)...[/]",
+            spinner="dots",
+        ):
             # LLM Config
             llm_config = LLMConfig(model=self.selected_model)
 
             # Browser profile kwargs
             browser_kwargs = {}
             if self.selected_browser_profile:
-                browser_kwargs["browser_name"] = self.selected_browser_profile["browser"]
-                browser_kwargs["browser_profile_directory"] = self.selected_browser_profile[
-                    "profile_directory"
+                browser_kwargs["browser_name"] = self.selected_browser_profile[
+                    "browser"
                 ]
+                browser_kwargs["browser_profile_directory"] = (
+                    self.selected_browser_profile["profile_directory"]
+                )
 
             # Create copilot
             copilot = await create_copilot(
@@ -401,7 +501,7 @@ class CopilotCLI:
                 self.current_thread = threads[0]  # most recently updated
             else:
                 self.current_thread = self.controller.create_thread()
-        
+
         thread_title = self.current_thread["title"]
         thread_id = self.current_thread["id"][:8] + "..."
         # Clear and render the main screen
@@ -416,7 +516,7 @@ class CopilotCLI:
     def _show_commands_help(self):
         """Display available commands in a perfectly aligned 2-column layout using a Table."""
         console.print(Rule("[bold cyan]Available Commands[/]", style="cyan"))
-        
+
         table = Table(show_header=False, box=None, padding=(0, 2), expand=True)
         table.add_column("left_cmd", style="bold cyan", width=16)
         table.add_column("left_desc", style="white")
@@ -426,33 +526,33 @@ class CopilotCLI:
         items = list(COMMANDS_HELP.items())
         # Logic to split into two columns: left column first half, right column second half
         mid = (len(items) + 1) // 2
-        
+
         for i in range(mid):
             row = []
             # Left column
             cmd, desc = items[i]
             row.extend([f"  {cmd}", desc])
-            
+
             # Right column
             if i + mid < len(items):
                 cmd, desc = items[i + mid]
                 row.extend([f"  {cmd}", desc])
             else:
                 row.extend(["", ""])
-            
+
             table.add_row(*row)
-            
+
         console.print(table)
 
     def _render_post_setup_screen(self):
         """Clear terminal and render the main screen after setup completes."""
-        if os.name == 'nt':
-            os.system('cls')
+        if os.name == "nt":
+            os.system("cls")
         else:
             # \033[H: move to home, \033[2J: clear screen, \033[3J: clear scrollback
             sys.stdout.write("\033[H\033[2J\033[3J")
             sys.stdout.flush()
-        
+
         self._render_banner()
 
         console.print(Rule(style="dim cyan"))
@@ -460,10 +560,10 @@ class CopilotCLI:
         # Info box: current thread + model
         thread_title = self.current_thread["title"] if self.current_thread else "None"
         thread_id = self.current_thread["id"][:8] + "..." if self.current_thread else ""
-        
+
         info_parts = [
             f"  [bold cyan]Thread:[/] [white]{thread_title}[/] [dim]({thread_id})[/]",
-            f"  [bold cyan]Model:[/] [white]{self.selected_model}[/]"
+            f"  [bold cyan]Model:[/] [white]{self.selected_model}[/]",
         ]
         console.print(Columns(info_parts, padding=(0, 8)))
 
@@ -479,7 +579,7 @@ class CopilotCLI:
         """Create a new thread without prompting for a title."""
         self.current_thread = self.controller.create_thread()
         self.is_new_thread = True
-        
+
         # Clear terminal and render post-setup screen
         self._render_post_setup_screen()
         console.print(f"  [green]✓[/] Created new thread")
@@ -507,8 +607,14 @@ class CopilotCLI:
         table.add_column("Updated", style="dim cyan")
 
         for i, t in enumerate(threads, 1):
-            marker = " [bold green]*[/]" if self.current_thread and t["id"] == self.current_thread["id"] else ""
-            table.add_row(str(i), t["title"] + marker, t["id"][:8] + "...", t["updated_at"][:19])
+            marker = (
+                " [bold green]*[/]"
+                if self.current_thread and t["id"] == self.current_thread["id"]
+                else ""
+            )
+            table.add_row(
+                str(i), t["title"] + marker, t["id"][:8] + "...", t["updated_at"][:19]
+            )
 
         console.print(table)
         choice = Prompt.ask("  Select thread number", console=console)
@@ -518,7 +624,7 @@ class CopilotCLI:
             if 0 <= idx < len(threads):
                 self.current_thread = threads[idx]
                 self.controller.touch_thread(self.current_thread["id"])
-                
+
                 # Clear terminal and render post-setup screen
                 self._render_post_setup_screen()
                 console.print(
@@ -554,12 +660,17 @@ class CopilotCLI:
             if 0 <= idx < len(threads):
                 target = threads[idx]
                 if Confirm.ask(
-                    f"  Delete [bold red]{target['title']}[/]?", default=False, console=console
+                    f"  Delete [bold red]{target['title']}[/]?",
+                    default=False,
+                    console=console,
                 ):
                     self.controller.delete_thread(target["id"])
                     console.print(f"  [red]✗[/] Deleted: {target['title']}")
                     # If we deleted the current thread, switch or create new
-                    if self.current_thread and target["id"] == self.current_thread["id"]:
+                    if (
+                        self.current_thread
+                        and target["id"] == self.current_thread["id"]
+                    ):
                         remaining = self.controller.list_threads()
                         if remaining:
                             self.current_thread = remaining[0]
@@ -602,7 +713,11 @@ class CopilotCLI:
         table.add_column("Updated", style="dim cyan")
 
         for i, t in enumerate(threads, 1):
-            marker = " [bold green]*[/]" if self.current_thread and t["id"] == self.current_thread["id"] else ""
+            marker = (
+                " [bold green]*[/]"
+                if self.current_thread and t["id"] == self.current_thread["id"]
+                else ""
+            )
             table.add_row(
                 str(i),
                 t["title"] + marker,
@@ -615,13 +730,19 @@ class CopilotCLI:
 
     async def _cmd_change_model(self):
         """Change the active model (requires agent rebuild)."""
-        console.print("  [yellow]Note: Changing the model requires rebuilding the agent.[/]")
+        console.print(
+            "  [yellow]Note: Changing the model requires rebuilding the agent.[/]"
+        )
         new_model = await self._select_model()
         if new_model != self.selected_model:
             self.selected_model = new_model
             console.print(f"  [green]Model set to:[/] [bold]{self.selected_model}[/]")
-            console.print("  [yellow]The new model will take effect on the next agent rebuild.[/]")
-            console.print("  [dim]Tip: Use /new-thread or restart CIRI to rebuild with the new model.[/]")
+            console.print(
+                "  [yellow]The new model will take effect on the next agent rebuild.[/]"
+            )
+            console.print(
+                "  [dim]Tip: Use /new-thread or restart CIRI to rebuild with the new model.[/]"
+            )
         else:
             console.print("  [dim]Model unchanged.[/]")
 
@@ -642,17 +763,21 @@ class CopilotCLI:
         tc_id = tool_call.get("id", "")
 
         args_text = json.dumps(args, indent=2, default=str) if args else "{}"
-        syntax = Syntax(args_text, "json", theme="monokai", line_numbers=False, word_wrap=True)
+        syntax = Syntax(
+            args_text, "json", theme="monokai", line_numbers=False, word_wrap=True
+        )
 
         console.print()
-        console.print(Panel(
-            syntax,
-            title=f" [bold bright_yellow]Tool Call:[/] [bold]{name}[/] [dim]({tc_id[:8]})[/] ",
-            title_align="left",
-            border_style="bright_yellow",
-            padding=(0, 1),
-            box=box.ROUNDED,
-        ))
+        console.print(
+            Panel(
+                syntax,
+                title=f" [bold bright_yellow]Tool Call:[/] [bold]{name}[/] [dim]({tc_id[:8]})[/] ",
+                title_align="left",
+                border_style="bright_yellow",
+                padding=(0, 1),
+                box=box.ROUNDED,
+            )
+        )
 
     @staticmethod
     def _render_tool_message(msg: ToolMessage):
@@ -664,7 +789,10 @@ class CopilotCLI:
         # Truncate very long outputs
         max_len = 5000  # Increased for better visibility, but still capped
         if len(content) > max_len:
-            content = content[:max_len] + f"\n... [dim](truncated, {len(content)} chars total)[/]"
+            content = (
+                content[:max_len]
+                + f"\n... [dim](truncated, {len(content)} chars total)[/]"
+            )
 
         title_parts = ["[bold bright_green]Tool Response[/]"]
         if tool_name:
@@ -673,14 +801,16 @@ class CopilotCLI:
             title_parts.append(f"[dim]({tc_id[:8]})[/]")
 
         console.print()
-        console.print(Panel(
-            content,
-            title=f" {' '.join(title_parts)} ",
-            title_align="left",
-            border_style="bright_green",
-            padding=(0, 1),
-            box=box.ROUNDED,
-        ))
+        console.print(
+            Panel(
+                content,
+                title=f" {' '.join(title_parts)} ",
+                title_align="left",
+                border_style="bright_green",
+                padding=(0, 1),
+                box=box.ROUNDED,
+            )
+        )
 
     @staticmethod
     def _render_system_message(msg: SystemMessage):
@@ -694,22 +824,24 @@ class CopilotCLI:
         """Render a summarization or reasoning block in a beautiful Panel."""
         if not text.strip():
             return
-        
+
         console.print()
-        console.print(Panel(
-            text,
-            title=f" [bold blue]{title}[/] ",
-            title_align="left",
-            border_style="blue",
-            padding=(1, 2),
-            style="italic",
-            box=box.ROUNDED,
-        ))
+        console.print(
+            Panel(
+                text,
+                title=f" [bold blue]{title}[/] ",
+                title_align="left",
+                border_style="blue",
+                padding=(1, 2),
+                style="italic",
+                box=box.ROUNDED,
+            )
+        )
 
     @staticmethod
     def _render_ai_complete(content: Union[str, List[Dict[str, Any]]]):
         """Render a complete AI message (non-streamed).
-        
+
         Handles both simple strings and complex content lists with reasoning blocks.
         """
         if isinstance(content, str):
@@ -721,7 +853,7 @@ class CopilotCLI:
             for block in content:
                 if not isinstance(block, dict):
                     continue
-                
+
                 btype = block.get("type")
                 if btype == "reasoning":
                     summary_list = block.get("summary", [])
@@ -729,7 +861,7 @@ class CopilotCLI:
                     for s in summary_list:
                         if isinstance(s, dict) and s.get("type") == "summary_text":
                             summary_text += s.get("text", "")
-                    
+
                     if summary_text:
                         CopilotCLI._render_summary_panel(summary_text)
                 elif btype == "text":
@@ -749,7 +881,7 @@ class CopilotCLI:
 
         config = {"configurable": {"thread_id": self.current_thread["id"]}}
         state = await self.controller.get_state(config)
-        
+
         if not state or "messages" not in state.values:
             return
 
@@ -758,7 +890,7 @@ class CopilotCLI:
             return
 
         console.print(Rule("[dim]Conversation History[/]", style="dim cyan"))
-        
+
         for msg in messages:
             if isinstance(msg, HumanMessage):
                 self._render_human_message(msg)
@@ -767,7 +899,7 @@ class CopilotCLI:
                 console.print()
                 console.print("[bold cyan]CIRI >[/]")
                 self._render_ai_complete(msg.content)
-                
+
                 # Also render tool calls if any
                 for tc in getattr(msg, "tool_calls", []):
                     self._render_tool_call(tc)
@@ -789,13 +921,15 @@ class CopilotCLI:
             return []
 
         console.print()
-        console.print(Panel(
-            "[bold]CIRI needs your input[/]",
-            title="[bold yellow]Clarification Needed[/]",
-            title_align="left",
-            border_style="yellow",
-            padding=(0, 1),
-        ))
+        console.print(
+            Panel(
+                "[bold]CIRI needs your input[/]",
+                title="[bold yellow]Clarification Needed[/]",
+                title_align="left",
+                border_style="yellow",
+                padding=(0, 1),
+            )
+        )
 
         responses = []
         for i, query in enumerate(queries, 1):
@@ -829,16 +963,20 @@ class CopilotCLI:
 
         return responses
 
-    def _handle_script_execution_interrupt(self, interrupt_value: dict) -> Union[str, dict]:
+    def _handle_script_execution_interrupt(
+        self, interrupt_value: dict
+    ) -> Union[str, dict]:
         """Handle script_execution interrupt - approve/reject/edit script."""
         console.print()
-        console.print(Panel(
-            "[bold]A script wants to execute[/]",
-            title="[bold red]Script Execution Approval[/]",
-            title_align="left",
-            border_style="red",
-            padding=(0, 1),
-        ))
+        console.print(
+            Panel(
+                "[bold]A script wants to execute[/]",
+                title="[bold red]Script Execution Approval[/]",
+                title_align="left",
+                border_style="red",
+                padding=(0, 1),
+            )
+        )
 
         lang = interrupt_value.get("language", "python")
         deps = interrupt_value.get("dependencies", [])
@@ -850,7 +988,9 @@ class CopilotCLI:
             console.print(f"  [bold]Dependencies:[/] {', '.join(deps)}")
         console.print(f"  [bold]Timeout:[/] {timeout}s")
         console.print()
-        console.print(Syntax(script, lang, theme="monokai", line_numbers=True, word_wrap=True))
+        console.print(
+            Syntax(script, lang, theme="monokai", line_numbers=True, word_wrap=True)
+        )
         console.print()
 
         decision = Prompt.ask(
@@ -864,7 +1004,9 @@ class CopilotCLI:
             reason = Prompt.ask("  Reason (optional)", default="", console=console)
             return {"status": "rejected", "reason": reason}
         elif decision in ("edit", "e"):
-            console.print("  [dim]Enter the edited script (end with an empty line containing only 'EOF'):[/]")
+            console.print(
+                "  [dim]Enter the edited script (end with an empty line containing only 'EOF'):[/]"
+            )
             lines = []
             while True:
                 try:
@@ -887,13 +1029,15 @@ class CopilotCLI:
         action_requests = interrupt_value.get("action_requests", [])
 
         console.print()
-        console.print(Panel(
-            "[bold]Tool execution requires your approval[/]",
-            title="[bold red]Tool Approval Required[/]",
-            title_align="left",
-            border_style="red",
-            padding=(0, 1),
-        ))
+        console.print(
+            Panel(
+                "[bold]Tool execution requires your approval[/]",
+                title="[bold red]Tool Approval Required[/]",
+                title_align="left",
+                border_style="red",
+                padding=(0, 1),
+            )
+        )
 
         decisions = []
         for i, action in enumerate(action_requests):
@@ -906,7 +1050,15 @@ class CopilotCLI:
                 console.print(f"  [dim]{desc}[/]")
             if args:
                 args_text = json.dumps(args, indent=2, default=str)
-                console.print(Syntax(args_text, "json", theme="monokai", line_numbers=False, word_wrap=True))
+                console.print(
+                    Syntax(
+                        args_text,
+                        "json",
+                        theme="monokai",
+                        line_numbers=False,
+                        word_wrap=True,
+                    )
+                )
 
             # Find allowed decisions for this action
             allowed = ["approve", "reject"]
@@ -944,10 +1096,12 @@ class CopilotCLI:
                 raw = Prompt.ask("  ", console=console)
                 try:
                     edited_args = json.loads(raw)
-                    decisions.append({
-                        "type": "edit",
-                        "edited_action": {"name": name, "args": edited_args},
-                    })
+                    decisions.append(
+                        {
+                            "type": "edit",
+                            "edited_action": {"name": name, "args": edited_args},
+                        }
+                    )
                 except json.JSONDecodeError:
                     console.print("  [yellow]Invalid JSON, approving instead.[/]")
                     decisions.append({"type": "approve"})
@@ -969,17 +1123,19 @@ class CopilotCLI:
         else:
             # Unknown interrupt - show raw and ask for JSON response
             console.print()
-            console.print(Panel(
-                Syntax(
-                    json.dumps(interrupt_data, indent=2, default=str),
-                    "json",
-                    theme="monokai",
-                ),
-                title="[bold yellow]Unknown Interrupt[/]",
-                title_align="left",
-                border_style="yellow",
-                padding=(0, 1),
-            ))
+            console.print(
+                Panel(
+                    Syntax(
+                        json.dumps(interrupt_data, indent=2, default=str),
+                        "json",
+                        theme="monokai",
+                    ),
+                    title="[bold yellow]Unknown Interrupt[/]",
+                    title_align="left",
+                    border_style="yellow",
+                    padding=(0, 1),
+                )
+            )
             raw = Prompt.ask("  Respond (JSON or text)", console=console)
             try:
                 return json.loads(raw)
@@ -1000,14 +1156,14 @@ class CopilotCLI:
         ai_buffer = ""  # accumulates streamed AI tokens
         pending_interrupts = []  # collect interrupts from updates
         streaming_ai = False
-        
+
         # Node-name to indicator map
         INDICATORS = {
             "researcher": "Exploring...",
             "planner": "Planning...",
             "executor": "Executing...",
             "writer": "Writing...",
-            "default": "Thinking..."
+            "default": "Thinking...",
         }
 
         try:
@@ -1023,7 +1179,7 @@ class CopilotCLI:
                         if isinstance(message, (AIMessageChunk, AIMessage)):
                             # Hide status when starting to stream tokens
                             status.stop()
-                            
+
                             token = ""
                             if isinstance(message.content, str):
                                 token = message.content
@@ -1031,7 +1187,7 @@ class CopilotCLI:
                                 for block in message.content:
                                     if not isinstance(block, dict):
                                         continue
-                                    
+
                                     btype = block.get("type")
                                     if btype == "text":
                                         token += block.get("text", "")
@@ -1042,21 +1198,28 @@ class CopilotCLI:
                                         summary_list = block.get("summary", [])
                                         summary_text = ""
                                         for s in summary_list:
-                                            if isinstance(s, dict) and s.get("type") == "summary_text":
+                                            if (
+                                                isinstance(s, dict)
+                                                and s.get("type") == "summary_text"
+                                            ):
                                                 summary_text += s.get("text", "")
-                                        
+
                                         if summary_text:
                                             # Flush if we were already streaming text
                                             if streaming_ai:
                                                 sys.stdout.write("\n")
                                                 sys.stdout.flush()
                                                 streaming_ai = False
-                                            
-                                            CopilotCLI._render_summary_panel(summary_text)
-                                            
+
+                                            CopilotCLI._render_summary_panel(
+                                                summary_text
+                                            )
+
                                             # Resume CIRI prompt for subsequent text
                                             if not streaming_ai:
-                                                console.print("[bold cyan]CIRI >[/] ", end="")
+                                                console.print(
+                                                    "[bold cyan]CIRI >[/] ", end=""
+                                                )
                                                 streaming_ai = True
 
                             if token:
@@ -1094,7 +1257,10 @@ class CopilotCLI:
                                 continue
 
                             # Process messages in the update
-                            if isinstance(node_value, dict) and "messages" in node_value:
+                            if (
+                                isinstance(node_value, dict)
+                                and "messages" in node_value
+                            ):
                                 messages = node_value["messages"]
                                 if not isinstance(messages, list):
                                     messages = [messages]
@@ -1110,7 +1276,9 @@ class CopilotCLI:
 
                                     if isinstance(msg, HumanMessage):
                                         self._render_human_message(msg)
-                                    elif isinstance(msg, AIMessage) and not isinstance(msg, AIMessageChunk):
+                                    elif isinstance(msg, AIMessage) and not isinstance(
+                                        msg, AIMessageChunk
+                                    ):
                                         # Full AI message from updates - render tool_calls only
                                         for tc in getattr(msg, "tool_calls", []):
                                             self._render_tool_call(tc)
@@ -1124,7 +1292,7 @@ class CopilotCLI:
             if streaming_ai and ai_buffer.strip():
                 sys.stdout.write("\n")
                 sys.stdout.flush()
-            
+
             # Ensure status is stopped
             # status is automatically stopped by the with block
 
@@ -1192,7 +1360,9 @@ class CopilotCLI:
                 elif cmd == "/change-model":
                     await self._cmd_change_model()
                 else:
-                    console.print(f"  [yellow]Unknown command: {cmd}[/]. Type /help for available commands.")
+                    console.print(
+                        f"  [yellow]Unknown command: {cmd}[/]. Type /help for available commands."
+                    )
 
                 console.print()
                 continue
@@ -1203,21 +1373,25 @@ class CopilotCLI:
             # ── Auto-generate title for new thread ──
             if self.is_new_thread:
                 # Clean up input for title: first line, max 40 chars
-                first_line = user_input.split('\n')[0].strip()
-                title = (first_line[:37] + "...") if len(first_line) > 40 else first_line
+                first_line = user_input.split("\n")[0].strip()
+                title = (
+                    (first_line[:37] + "...") if len(first_line) > 40 else first_line
+                )
                 if not title:
                     title = "New Thread"
-                
+
                 self.controller.rename_thread(self.current_thread["id"], title)
                 self.current_thread["title"] = title
                 self.is_new_thread = False
-                
+
                 # Update info line to show new title
                 console.print(f"  [dim]Thread renamed to:[/] [bold cyan]{title}[/]")
                 console.print()
 
             try:
-                await self._stream_response({"messages": [HumanMessage(content=user_input)]})
+                await self._stream_response(
+                    {"messages": [HumanMessage(content=user_input)]}
+                )
             except KeyboardInterrupt:
                 console.print("\n  [yellow]Interrupted.[/]")
             except Exception as e:

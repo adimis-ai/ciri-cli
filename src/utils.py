@@ -7,8 +7,13 @@ import logging
 import platform
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple, Any
 from dotenv import load_dotenv, set_key
+
+try:
+    import pathspec
+except ImportError:
+    pathspec = None
 
 logger = logging.getLogger(__name__)
 
@@ -450,3 +455,247 @@ def resolve_browser_profile(
         "profile_directory": selected["profile_directory"],
         "browser": selected["browser"],
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Autocomplete Discovery Functions
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+# Directories always excluded from file/folder autocomplete
+_EXCLUDED_DIRS = {
+    # Version control
+    ".git",
+    ".hg",
+    ".svn",
+    # Python
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".tox",
+    ".eggs",
+    # Node.js
+    "node_modules",
+    ".npm",
+    ".next",
+    ".nuxt",
+    # IDE/Editor
+    ".idea",
+    ".vscode",
+    # Java/Maven/Gradle
+    "target",
+    ".gradle",
+    ".m2",
+    # PHP/Composer
+    "vendor",
+    # Frontend
+    "bower_components",
+    # Build outputs
+    "out",
+    "dist",
+    "build",
+    # Coverage
+    "htmlcov",
+    "coverage",
+    # CIRI
+    ".ciri",
+}
+
+
+def _load_gitignore_spec(directory: Path):
+    """Load a single .gitignore file from a directory, returning a PathSpec or None."""
+    if pathspec is None:
+        return None
+    gitignore_file = directory / ".gitignore"
+    if not gitignore_file.is_file():
+        return None
+    try:
+        with open(gitignore_file, "r", encoding="utf-8") as f:
+            return pathspec.PathSpec.from_lines("gitwildmatch", f)
+    except Exception:
+        return None
+
+
+def _is_ignored_by_specs(
+    rel_path: str, is_dir: bool, specs: List[Tuple[Path, Any]], root: Path
+) -> bool:
+    """Check if a relative path is ignored by any gitignore spec.
+
+    Args:
+        rel_path: Path relative to root (e.g. "src/foo/bar.py")
+        is_dir: Whether the path is a directory
+        specs: List of (spec_directory, PathSpec) tuples
+        root: The workspace root
+    """
+    # For directory matching, gitignore patterns like "build/" need trailing slash
+    match_path = rel_path + "/" if is_dir else rel_path
+
+    for spec_dir, spec in specs:
+        try:
+            # Get path relative to the spec's directory
+            spec_rel = spec_dir.relative_to(root)
+            spec_rel_str = str(spec_rel)
+
+            if spec_rel_str == ".":
+                # Root-level gitignore — match against full rel_path
+                path_for_match = match_path
+            else:
+                # Nested gitignore — match against path relative to that gitignore's dir
+                prefix = spec_rel_str + "/"
+                if not rel_path.startswith(prefix):
+                    continue
+                path_for_match = match_path[len(prefix) :]
+
+            if spec.match_file(path_for_match):
+                return True
+        except (ValueError, Exception):
+            continue
+
+    return False
+
+
+def _walk_with_gitignore(
+    root: Path,
+    collect_files: bool = True,
+    collect_dirs: bool = False,
+    prefix: str = "",
+) -> List[str]:
+    """Walk directory tree respecting .gitignore and excluded dirs.
+
+    Uses os.walk with directory pruning so we never descend into ignored dirs.
+    Loads .gitignore specs incrementally as we encounter them.
+    """
+    results = []
+    # Accumulate gitignore specs: list of (directory_path, PathSpec)
+    gitignore_specs: List[Tuple[Path, Any]] = []
+
+    # Load root .gitignore first
+    root_spec = _load_gitignore_spec(root)
+    if root_spec is not None:
+        gitignore_specs.append((root, root_spec))
+
+    for dirpath_str, dirnames, filenames in os.walk(root, topdown=True):
+        dirpath = Path(dirpath_str)
+
+        # Load .gitignore from current directory (if not root, already loaded)
+        if dirpath != root:
+            dir_spec = _load_gitignore_spec(dirpath)
+            if dir_spec is not None:
+                gitignore_specs.append((dirpath, dir_spec))
+
+        # Prune directories: remove ignored dirs from dirnames in-place
+        pruned = []
+        for d in dirnames:
+            # Always exclude hardcoded dirs
+            if d in _EXCLUDED_DIRS:
+                continue
+            # Check against gitignore specs
+            child_rel = str((dirpath / d).relative_to(root))
+            if _is_ignored_by_specs(child_rel, True, gitignore_specs, root):
+                continue
+            pruned.append(d)
+        dirnames[:] = sorted(pruned)
+
+        # Collect directories
+        if collect_dirs and dirpath != root:
+            rel_dir = str(dirpath.relative_to(root))
+            if prefix == "" or rel_dir.startswith(prefix):
+                results.append(rel_dir)
+
+        # Collect files
+        if collect_files:
+            for fname in filenames:
+                # Skip common non-useful files
+                if fname.endswith((".swp", ".swo", ".pyc", ".pyo")):
+                    continue
+                file_path = dirpath / fname
+                rel_file = str(file_path.relative_to(root))
+                if _is_ignored_by_specs(rel_file, False, gitignore_specs, root):
+                    continue
+                if prefix == "" or rel_file.startswith(prefix):
+                    results.append(rel_file)
+
+    return sorted(results)
+
+
+def list_files_with_gitignore(root: Path, prefix: str = "") -> List[str]:
+    """List all files respecting .gitignore, excluding common directories."""
+    try:
+        return _walk_with_gitignore(
+            root, collect_files=True, collect_dirs=False, prefix=prefix
+        )
+    except Exception:
+        return []
+
+
+def list_folders_with_gitignore(root: Path, prefix: str = "") -> List[str]:
+    """List all directories respecting .gitignore, excluding common directories."""
+    try:
+        return _walk_with_gitignore(
+            root, collect_files=False, collect_dirs=True, prefix=prefix
+        )
+    except Exception:
+        return []
+
+
+def list_skills(root: Path, prefix: str = "") -> List[str]:
+    """Discover all skill names from .ciri/skills directories."""
+    skills = []
+
+    try:
+        for ciri_dir in root.rglob(".ciri"):
+            if ciri_dir.is_dir():
+                skills_dir = ciri_dir / "skills"
+                if skills_dir.is_dir():
+                    for item in skills_dir.iterdir():
+                        if item.is_dir():
+                            skill_name = item.name
+                            if prefix == "" or skill_name.startswith(prefix):
+                                skills.append(skill_name)
+    except Exception:
+        pass
+
+    return sorted(set(skills))
+
+
+def list_toolkits(root: Path, prefix: str = "") -> List[str]:
+    """Discover all toolkit names from .ciri/toolkits directories."""
+    toolkits = []
+
+    try:
+        for ciri_dir in root.rglob(".ciri"):
+            if ciri_dir.is_dir():
+                toolkits_dir = ciri_dir / "toolkits"
+                if toolkits_dir.is_dir():
+                    for item in toolkits_dir.iterdir():
+                        if item.is_dir():
+                            toolkit_name = item.name
+                            if prefix == "" or toolkit_name.startswith(prefix):
+                                toolkits.append(toolkit_name)
+    except Exception:
+        pass
+
+    return sorted(set(toolkits))
+
+
+def list_subagents(root: Path, prefix: str = "") -> List[str]:
+    """Discover all subagent names from .ciri/subagents/*.{yaml,yml,json}."""
+    subagents = []
+
+    try:
+        for ciri_dir in root.rglob(".ciri"):
+            if ciri_dir.is_dir():
+                subagents_dir = ciri_dir / "subagents"
+                if subagents_dir.is_dir():
+                    for ext in ["*.yaml", "*.yml", "*.json"]:
+                        for config_file in subagents_dir.glob(ext):
+                            subagent_name = config_file.stem
+                            if prefix == "" or subagent_name.startswith(prefix):
+                                subagents.append(subagent_name)
+    except Exception:
+        pass
+
+    return sorted(set(subagents))
