@@ -62,6 +62,7 @@ from .utils import (
     save_settings,
     sync_default_skills,
 )
+from .backend import CiriBackend
 from .copilot import create_copilot
 from .controller import CopilotController
 from .serializers import LLMConfig
@@ -674,12 +675,19 @@ class CopilotCLI:
                     self.selected_browser_profile["profile_directory"]
                 )
 
+            # Create backend with real-time output streaming callback
+            def _on_execute_output(line: str):
+                console.print(f"  [dim green]|[/] [dim]{line}[/]")
+
+            self.backend = CiriBackend(output_callback=_on_execute_output)
+
             # Create copilot
             copilot = await create_copilot(
                 name="Ciri",
                 llm_config=llm_config,
                 checkpointer=self.checkpointer,
                 all_allowed=self.all_allowed,
+                backend=self.backend,
                 **browser_kwargs,
             )
         if is_cdp_port_open():
@@ -1459,8 +1467,7 @@ class CopilotCLI:
             )
             console.print()
 
-    @staticmethod
-    def _render_filesystem_tool_response(msg: ToolMessage):
+    def _render_filesystem_tool_response(self, msg: ToolMessage):
         """Render a filesystem tool response with appropriate formatting."""
         content = msg.content if isinstance(msg.content, str) else str(msg.content)
         tool_name = getattr(msg, "name", None) or ""
@@ -1499,25 +1506,37 @@ class CopilotCLI:
             )
 
         elif tool_name == "execute":
-            display = content
-            if truncated:
-                display += f"\n... (truncated)"
-            console.print(
-                Panel(
-                    Syntax(
-                        display,
-                        "bash",
-                        theme="monokai",
-                        line_numbers=False,
-                        word_wrap=True,
-                    ),
-                    title=" [bold bright_green]⚡ Output[/] ",
-                    title_align="left",
-                    border_style="green",
-                    padding=(0, 1),
-                    box=box.ROUNDED,
+            # If output was already streamed line-by-line, show compact summary
+            if hasattr(self, "backend") and self.backend._last_streamed:
+                exit_line = ""
+                for line in content.splitlines():
+                    if line.startswith("[Command "):
+                        exit_line = line
+                        break
+                if exit_line:
+                    console.print(f"  [dim]{exit_line}[/]")
+                console.print()
+                self.backend._last_streamed = False
+            else:
+                display = content
+                if truncated:
+                    display += f"\n... (truncated)"
+                console.print(
+                    Panel(
+                        Syntax(
+                            display,
+                            "bash",
+                            theme="monokai",
+                            line_numbers=False,
+                            word_wrap=True,
+                        ),
+                        title=" [bold bright_green]⚡ Output[/] ",
+                        title_align="left",
+                        border_style="green",
+                        padding=(0, 1),
+                        box=box.ROUNDED,
+                    )
                 )
-            )
 
         elif tool_name in ("write_file", "edit_file"):
             # These return short success/error messages
@@ -1579,14 +1598,13 @@ class CopilotCLI:
             )
         console.print()
 
-    @staticmethod
-    def _render_tool_message(msg: ToolMessage):
+    def _render_tool_message(self, msg: ToolMessage):
         """Render a ToolMessage (tool response) in a Panel box."""
         tool_name = getattr(msg, "name", None) or ""
 
         # Dispatch tools to custom renderers
         if tool_name in CopilotCLI._FILESYSTEM_TOOLS:
-            CopilotCLI._render_filesystem_tool_response(msg)
+            self._render_filesystem_tool_response(msg)
         elif tool_name == "simple_web_search":
             CopilotCLI._render_web_search_response(msg)
         else:

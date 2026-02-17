@@ -1,0 +1,11 @@
+:root {
+  --ifm-color-primary: #5b21b6;
+}
+
+.theme-default .navbar {
+  border-bottom: 1px solid #eee;
+}
+
+.docMainContainer {
+  max-width: 1100px;
+}

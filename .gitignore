@@ -12,3 +12,6 @@ dist/
 .claude/
 notes/
 output.txt
+node_modules/
+.docusaurus/
+build/
