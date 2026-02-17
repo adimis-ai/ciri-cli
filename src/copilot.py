@@ -52,6 +52,7 @@ from .subagents import (
     build_web_researcher_agent,
     build_toolkit_builder_agent,
     build_subagent_builder_agent,
+    build_trainer_agent,
 )
 from .middlewares import (
     SkillsMiddleware,
@@ -177,6 +178,14 @@ async def create_copilot(
                 web_researcher_agent=web_researcher,
             ),
             await build_subagent_builder_agent(
+                model=model,
+                backend=backend,
+                all_allowed=all_allowed,
+                cdp_endpoint=cdp_endpoint,
+                crawler_browser_config=crawler_browser_config,
+                web_researcher_agent=web_researcher,
+            ),
+            await build_trainer_agent(
                 model=model,
                 backend=backend,
                 all_allowed=all_allowed,
