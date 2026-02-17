@@ -111,9 +111,7 @@ async def build_skill_builder_agent(
     model: BaseChatModel,
     backend: CiriBackend,
     all_allowed: bool = False,
-    browser_name: Optional[str] = None,
-    profile_directory: Optional[str] = None,
-    headless: Optional[bool] = None,
+    cdp_endpoint: Optional[str] = None,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
     web_researcher_agent: Optional[CompiledSubAgent] = None,
 ) -> CompiledSubAgent:
@@ -121,10 +119,8 @@ async def build_skill_builder_agent(
     if web_researcher_agent is None:
         web_researcher_agent = await build_web_researcher_agent(
             model=model,
-            headless=headless,
             all_allowed=all_allowed,
-            browser_name=browser_name,
-            profile_directory=profile_directory,
+            cdp_endpoint=cdp_endpoint or "http://localhost:9222",
             crawler_browser_config=crawler_browser_config,
         )
 

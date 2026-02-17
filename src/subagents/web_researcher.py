@@ -1,9 +1,4 @@
 import logging
-import os
-import platform
-import shutil
-import tempfile
-from pathlib import Path
 from typing import Optional, TYPE_CHECKING, Any, Type
 
 from pydantic import Field, BaseModel
@@ -27,7 +22,6 @@ from langchain.agents.middleware import (
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser as AsyncBrowser
-    from playwright.sync_api import Browser as SyncBrowser
 
 from ..toolkit.web_crawler_tool import (
     build_web_crawler_tool,
@@ -35,75 +29,31 @@ from ..toolkit.web_crawler_tool import (
     BrowserConfig as CrawlerBrowserConfig,
 )
 from ..toolkit.human_follow_up_tool import follow_up_with_human
-from ..utils import has_display, get_chrome_channel, resolve_browser_profile
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Anti-detection browser arguments
-# ---------------------------------------------------------------------------
-
-_STEALTH_ARGS: list[str] = [
-    "--disable-blink-features=AutomationControlled",
-    "--disable-infobars",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-popup-blocking",
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-]
-
 
 # ---------------------------------------------------------------------------
-# Playwright tools resolution
+# Playwright CDP connection
 # ---------------------------------------------------------------------------
 
 
-class PlaywrightBrowserInit:
-    def __init__(self, profile_path: str, launch_kwargs: dict):
-        self.profile_path = profile_path
-        self.launch_kwargs = launch_kwargs
+class PlaywrightCDPConnection:
+    """Connect to an already-running browser via Chrome DevTools Protocol."""
+
+    def __init__(self, cdp_endpoint: str):
+        self.cdp_endpoint = cdp_endpoint
         self._pw = None
         self._browser = None
 
-    def get_sync_browser(self) -> "SyncBrowser":
-        if self._browser is None:
-            from playwright.sync_api import sync_playwright
-
-            self._pw = sync_playwright().start()
-            self._browser = self._pw.chromium.launch_persistent_context(
-                self.profile_path, **self.launch_kwargs
-            ).browser
-        return self._browser
-
     async def get_async_browser(self) -> "AsyncBrowser":
         if self._browser is None:
-            from playwright.async_api import async_playwright, Error
+            from playwright.async_api import async_playwright
 
-            try:
-                self._pw = await async_playwright().start()
-                self._browser = (
-                    await self._pw.chromium.launch_persistent_context(
-                        self.profile_path, **self.launch_kwargs
-                    )
-                ).browser
-            except Error as e:
-                error_msg = str(e)
-                if (
-                    "error while loading shared libraries" in error_msg
-                    or "libnspr4.so" in error_msg
-                    or "Target closed" in error_msg
-                ):
-                    logger.error(
-                        "Playwright failed to launch. Likely missing system dependencies or restricted environment."
-                    )
-                    raise RuntimeError(
-                        "Playwright failed to launch. If you are on Linux, please ensure system dependencies are installed "
-                        "by running 'playwright install-deps'. "
-                        f"Original error: {error_msg}"
-                    ) from e
-                raise
+            self._pw = await async_playwright().start()
+            self._browser = await self._pw.chromium.connect_over_cdp(
+                self.cdp_endpoint
+            )
         return self._browser
 
 
@@ -152,52 +102,31 @@ class TakeScreenshotTool(BaseTool):
             return f"Error taking screenshot: {e}"
 
 
-async def get_playwright_tools(
-    user_data_dir: Optional[Path] = None,
-    profile_directory: Optional[str] = None,
-    headless: bool = False,
-    channel: Optional[str] = None,
-):
-    profile_directory = profile_directory or "Default"
+async def get_playwright_tools(cdp_endpoint: str):
+    """Get Playwright browser tools by connecting to the user's real browser
+    via Chrome DevTools Protocol.
+
+    Args:
+        cdp_endpoint: The CDP endpoint URL (e.g. ``"http://localhost:9222"``).
+    """
     logger.debug(
-        f"[get_playwright_tools] Initializing Playwright browser toolkit with profile_directory={profile_directory}, headless={headless}, channel={channel}"
+        "[get_playwright_tools] Connecting to real browser via CDP at %s",
+        cdp_endpoint,
     )
-    logger.debug(f"[get_playwright_tools] User data dir: {user_data_dir}")
-    # Chrome expects --user-data-dir=<parent> and --profile-directory=<subdir>.
-    # launch_persistent_context(user_data_dir) maps to --user-data-dir, so we
-    # pass the *parent* and add --profile-directory to args.
-    if user_data_dir:
-        profile_path = str(user_data_dir)
-    else:
-        # Fallback to a temporary directory if no profile is provided
-        temp_dir = tempfile.mkdtemp(prefix="ciri_playwright_")
-        profile_path = temp_dir
-        logger.info(
-            "No browser profile provided; using temporary directory: %s", temp_dir
-        )
 
-    launch_kwargs: dict = {
-        "headless": headless,
-        "args": list(_STEALTH_ARGS) + [f"--profile-directory={profile_directory}"],
-        "ignore_https_errors": True,
-        "viewport": {"width": 1920, "height": 1080},
-    }
-    if channel:
-        launch_kwargs["channel"] = channel
+    connection = PlaywrightCDPConnection(cdp_endpoint)
+    browser = await connection.get_async_browser()
 
-    browser_initializer = PlaywrightBrowserInit(profile_path, launch_kwargs)
-
-    adapter = PlayWrightBrowserToolkit.from_browser(
-        # sync_browser=browser_initializer.get_sync_browser(),
-        async_browser=await browser_initializer.get_async_browser(),
-    )
+    adapter = PlayWrightBrowserToolkit.from_browser(async_browser=browser)
     tools = adapter.get_tools()
 
     # Add the screenshot tool
     tools.append(TakeScreenshotTool(async_browser=adapter.async_browser))
 
     logger.info(
-        f"Initialized Playwright browser with profile at {profile_path} with tools: {[tool.name for tool in tools]}"
+        "Connected to real browser via CDP at %s — tools: %s",
+        cdp_endpoint,
+        [tool.name for tool in tools],
     )
     return tools
 
@@ -455,78 +384,38 @@ the answer, then provide supporting evidence.
 
 async def build_web_researcher_agent(
     model: BaseChatModel,
-    browser_name: Optional[str] = None,
-    profile_directory: Optional[str] = None,
-    headless: Optional[bool] = None,
+    cdp_endpoint: str,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
     all_allowed: bool = False,
 ) -> CompiledSubAgent:
-    """Build a web-researcher sub-agent with real-browser anti-detection.
+    """Build a web-researcher sub-agent that connects to the user's real
+    browser via Chrome DevTools Protocol (CDP).
 
-    The agent uses the user's actual installed browser (Chrome / Edge) with
-    their existing profile (cookies, sessions, fingerprint) to minimise
-    bot-detection on guarded platforms such as LinkedIn, Twitter, etc.
-
-    **Platform support:**
-
-    - **Windows** — detects Chrome / Edge in Program Files, uses the
-      profile from ``%LOCALAPPDATA%``.
-    - **macOS** — detects Chrome / Edge in /Applications, profile from
-      ``~/Library/Application Support``.
-    - **Linux** — detects ``google-chrome-stable`` / ``microsoft-edge``
-      on PATH, profile from ``~/.config``.
-    - **WSL2 with WSLg** — same as Linux, with headed mode if
-      ``$DISPLAY`` is set.
-    - **WSL2 without WSLg** — falls back to headless mode; also picks up
-      Windows-side profiles from ``/mnt/c/Users/.../Chrome/User Data``.
+    The agent operates on the user's actual running browser — real tabs,
+    real cookies, real sessions, real extensions.
 
     Args:
         model: The LLM to power the researcher agent.
-        browser_name: Preferred browser (``"chrome"``, ``"edge"``,
-            ``"chromium"``).  Auto-detected when ``None``.
-        profile_directory: Chrome profile subdirectory (e.g. ``"Default"``,
-            ``"Profile 1"``).  Auto-detected when ``None``.
-        headless: Force headed / headless mode.  Auto-detected based on
-            display availability when ``None``.
+        cdp_endpoint: The CDP HTTP endpoint (e.g. ``"http://localhost:9222"``).
         crawler_browser_config: Custom ``crawl4ai.BrowserConfig``.  Built
             automatically when ``None``.
         all_allowed: If ``True``, all tool calls are auto-approved. If ``False``,
             certain tools require human approval via ``HumanInTheLoopMiddleware``.
     """
-    # --- resolve profile & channel once, share across both browsers ---
-    # NOTE: In create_copilot, we resolve profile_info and crawler_browser_config.
-    # If they are NOT passed (e.g. direct call), we resolve them here as fallback.
-    profile_info = resolve_browser_profile(browser_name, profile_directory)
-    channel = get_chrome_channel()
-    effective_headless = headless if headless is not None else (not has_display())
+    # --- Playwright interactive tools via CDP ---
+    tools: list[BaseTool] = await get_playwright_tools(cdp_endpoint=cdp_endpoint)
 
-    if effective_headless and headless is None:
-        logger.info(
-            "No display server found (WSL2 without WSLg / headless server) "
-            "— both Playwright and crawl4ai will run headless"
-        )
-
-    # --- Playwright interactive tools ---
-    tools: list[BaseTool] = await get_playwright_tools(
-        user_data_dir=profile_info["user_data_dir"] if profile_info else None,
-        profile_directory=profile_info["profile_directory"] if profile_info else None,
-        headless=effective_headless,
-        channel=channel,
-    )
-
-    # # --- crawl4ai crawler tool ---
+    # --- crawl4ai crawler tool ---
     if not crawler_browser_config:
         crawler_browser_config = build_crawler_browser_config(
-            profile_info=profile_info,
-            headless=effective_headless,
-            channel=channel,
+            cdp_url=cdp_endpoint,
         )
     tools.append(build_web_crawler_tool(browser_config=crawler_browser_config))
 
-    # # --- DuckDuckGo search ---
+    # --- DuckDuckGo search ---
     tools.append(DuckDuckGoSearchResults(name="simple_web_search"))
 
-    # # --- Human follow-up (captcha, login, clarification) ---
+    # --- Human follow-up (captcha, login, clarification) ---
     tools.append(follow_up_with_human)
 
     # --- assemble agent ---
@@ -571,7 +460,7 @@ async def build_web_researcher_agent(
         name="web_research_agent",
         description=(
             "A sub-agent for in-depth web research using the user's real "
-            "browser profile to bypass bot detection.  Can search the web, "
+            "browser via CDP to bypass bot detection.  Can search the web, "
             "crawl pages for clean markdown content, and interactively "
             "browse sites (click, fill forms, extract data).  Effective on "
             "guarded platforms like LinkedIn, Twitter, and other sites that "

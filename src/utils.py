@@ -6,6 +6,8 @@ import asyncio
 import logging
 import platform
 import subprocess
+import socket
+import time as _time
 from pathlib import Path
 from typing import Optional, List, Tuple, Any
 from dotenv import load_dotenv, set_key
@@ -496,6 +498,163 @@ def resolve_browser_profile(
         "profile_directory": selected["profile_directory"],
         "browser": selected["browser"],
     }
+
+
+# ---------------------------------------------------------------------------
+# CDP (Chrome DevTools Protocol) browser helpers
+# ---------------------------------------------------------------------------
+
+# Anti-detection / UX flags added when launching Chrome for CDP control
+_CDP_LAUNCH_ARGS: list[str] = [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-infobars",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-popup-blocking",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+]
+
+
+def _get_browser_executable(browser_name: Optional[str] = None) -> Optional[str]:
+    """Return the absolute path (or command name) of Chrome / Edge on this OS.
+
+    If *browser_name* is ``None`` the function auto-detects the first
+    installed Chromium-based browser.
+    """
+    system = platform.system()
+
+    candidates: list[tuple[str, str]] = []
+
+    if system == "Windows":
+        candidates = [
+            (r"C:\Program Files\Google\Chrome\Application\chrome.exe", "chrome"),
+            (r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe", "chrome"),
+            (r"C:\Program Files\Microsoft\Edge\Application\msedge.exe", "edge"),
+        ]
+    elif system == "Darwin":
+        candidates = [
+            ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "chrome"),
+            ("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge", "edge"),
+        ]
+    else:  # Linux / WSL
+        for cmd, bname in [
+            ("google-chrome-stable", "chrome"),
+            ("google-chrome", "chrome"),
+            ("microsoft-edge-stable", "edge"),
+            ("microsoft-edge", "edge"),
+        ]:
+            path = shutil.which(cmd)
+            if path:
+                candidates.append((path, bname))
+
+    for exe, bname in candidates:
+        if browser_name and bname != browser_name:
+            continue
+        if Path(exe).exists() or shutil.which(exe):
+            return exe
+
+    return None
+
+
+def is_cdp_port_open(port: int = 9222) -> bool:
+    """Return ``True`` if something is already listening on *port*."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            s.connect(("127.0.0.1", port))
+            return True
+    except (ConnectionRefusedError, OSError):
+        return False
+
+
+def launch_browser_with_cdp(
+    port: int = 9222,
+    browser_name: Optional[str] = None,
+    user_data_dir: Optional[Path] = None,
+    profile_directory: Optional[str] = None,
+    *,
+    timeout: float = 15.0,
+) -> str:
+    """Ensure Chrome/Edge is running with ``--remote-debugging-port`` and
+    return the CDP HTTP endpoint (``http://localhost:<port>``).
+
+    If the port is already open we assume the browser is already running and
+    simply return the endpoint.  Otherwise we launch the browser as a detached
+    subprocess.
+
+    Args:
+        port: TCP port for Chrome DevTools Protocol.
+        browser_name: ``"chrome"`` or ``"edge"`` (auto-detected if ``None``).
+        user_data_dir: ``--user-data-dir`` value.  Uses the real profile
+            directory so the user's cookies / sessions / extensions are
+            present.
+        profile_directory: ``--profile-directory`` value (e.g. ``"Default"``).
+        timeout: Seconds to wait for the debugging port to open.
+
+    Returns:
+        The CDP endpoint URL, e.g. ``"http://localhost:9222"``.
+
+    Raises:
+        RuntimeError: If the browser could not be started or the port did not
+            open within *timeout* seconds.
+    """
+    endpoint = f"http://localhost:{port}"
+
+    # Already running? Return immediately.
+    if is_cdp_port_open(port):
+        logger.info("CDP port %d already open — reusing existing browser", port)
+        return endpoint
+
+    exe = _get_browser_executable(browser_name)
+    if not exe:
+        raise RuntimeError(
+            "Could not find a Chrome or Edge installation.  "
+            "Please install Google Chrome or Microsoft Edge."
+        )
+
+    args: list[str] = [
+        exe,
+        f"--remote-debugging-port={port}",
+        *_CDP_LAUNCH_ARGS,
+    ]
+    if user_data_dir:
+        args.append(f"--user-data-dir={user_data_dir}")
+    if profile_directory:
+        args.append(f"--profile-directory={profile_directory}")
+
+    logger.info("Launching browser for CDP: %s", " ".join(args))
+
+    # Launch as a fully detached process so it survives CIRI exit
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+        kwargs["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        )
+    else:
+        kwargs["start_new_session"] = True
+
+    subprocess.Popen(
+        args,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **kwargs,
+    )
+
+    # Wait for the debugging port to become reachable
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        if is_cdp_port_open(port):
+            logger.info("CDP endpoint ready at %s", endpoint)
+            return endpoint
+        _time.sleep(0.3)
+
+    raise RuntimeError(
+        f"Browser was launched but CDP port {port} did not open within "
+        f"{timeout}s.  Check that no other process is blocking the port."
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

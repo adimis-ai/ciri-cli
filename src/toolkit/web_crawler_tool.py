@@ -30,10 +30,27 @@ def build_crawler_browser_config(
     profile_info: Optional[dict] = None,
     headless: Optional[bool] = None,
     channel: Optional[str] = None,
+    cdp_url: Optional[str] = None,
 ) -> BrowserConfig:
     """Build a ``crawl4ai.BrowserConfig`` that uses the user's real browser
     profile for anti-detection.
+
+    When *cdp_url* is provided the crawler connects to an already-running
+    browser via Chrome DevTools Protocol instead of launching a new one.
     """
+    # CDP mode — connect to an existing browser
+    if cdp_url:
+        return BrowserConfig(
+            browser_type="chromium",
+            headless=False,
+            cdp_url=cdp_url,
+            extra_args=list(_STEALTH_ARGS),
+            ignore_https_errors=True,
+            viewport_width=1920,
+            viewport_height=1080,
+        )
+
+    # Fallback: launch a new browser (legacy path)
     if headless is None:
         headless = not has_display()
 

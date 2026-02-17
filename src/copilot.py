@@ -36,6 +36,8 @@ from .utils import (
     has_display,
     get_chrome_channel,
     resolve_browser_profile,
+    detect_browser_profiles,
+    launch_browser_with_cdp,
     get_default_filesystem_root,
 )
 from .prompts import PLAN_AND_RESEARCH_PROMPT
@@ -111,36 +113,42 @@ async def create_copilot(
     if not subagents:
         subagents = []
 
-    # --- resolve profile & crawler config once for all subagents ---
+    # --- Launch the user's real browser and get the CDP endpoint ---
+    # Resolve the browser profile info for --user-data-dir / --profile-directory
     profile_info = None
-    # Auto-find browser profile unless in WSL2 (which is complex to auto-map)
     if not is_wsl() and not browser_profile_directory:
         profile_info = resolve_browser_profile(browser_name, browser_profile_directory)
         if profile_info:
             browser_profile_directory = profile_info["profile_directory"]
             browser_name = profile_info["browser"]
 
-    effective_headless = (
-        use_headless_browser
-        if use_headless_browser is not None
-        else (not has_display())
+    # Determine the real user_data_dir for the browser profiles
+    real_user_data_dir = None
+    if profile_info:
+        # Use the ORIGINAL user_data_dir from detect_browser_profiles
+        # (not the copied one — we want the real browser)
+        profiles = detect_browser_profiles()
+        for p in profiles:
+            if p["browser"] == profile_info.get("browser") and p["profile_directory"] == browser_profile_directory:
+                real_user_data_dir = p["user_data_dir"]
+                break
+
+    cdp_endpoint = launch_browser_with_cdp(
+        browser_name=browser_name,
+        user_data_dir=real_user_data_dir,
+        profile_directory=browser_profile_directory,
     )
-    effective_channel = get_chrome_channel()
 
     if not crawler_browser_config:
         crawler_browser_config = build_crawler_browser_config(
-            profile_info=profile_info,
-            headless=effective_headless,
-            channel=effective_channel,
+            cdp_url=cdp_endpoint,
         )
 
     # Build web researcher once and share across subagent builders
     web_researcher = await build_web_researcher_agent(
         model=model,
         all_allowed=all_allowed,
-        browser_name=browser_name,
-        headless=effective_headless,
-        profile_directory=browser_profile_directory,
+        cdp_endpoint=cdp_endpoint,
         crawler_browser_config=crawler_browser_config,
     )
 
@@ -152,9 +160,7 @@ async def create_copilot(
                 model=model,
                 backend=backend,
                 all_allowed=all_allowed,
-                browser_name=browser_name,
-                headless=effective_headless,
-                profile_directory=browser_profile_directory,
+                cdp_endpoint=cdp_endpoint,
                 crawler_browser_config=crawler_browser_config,
                 web_researcher_agent=web_researcher,
             ),
@@ -162,9 +168,7 @@ async def create_copilot(
                 model=model,
                 backend=backend,
                 all_allowed=all_allowed,
-                browser_name=browser_name,
-                headless=effective_headless,
-                profile_directory=browser_profile_directory,
+                cdp_endpoint=cdp_endpoint,
                 crawler_browser_config=crawler_browser_config,
                 web_researcher_agent=web_researcher,
             ),
@@ -172,9 +176,7 @@ async def create_copilot(
                 model=model,
                 backend=backend,
                 all_allowed=all_allowed,
-                browser_name=browser_name,
-                headless=effective_headless,
-                profile_directory=browser_profile_directory,
+                cdp_endpoint=cdp_endpoint,
                 crawler_browser_config=crawler_browser_config,
                 web_researcher_agent=web_researcher,
             ),
