@@ -107,9 +107,13 @@ class LLMConfig(BaseModel):
         provider, model_name = self._parsed_model
         config = self._resolved_api_config
 
+        # For LangChain direct providers, transform 'provider/model' to 'provider:model'
+        # This helps init_chat_model infer the provider correctly.
+        effective_model = f"{provider}:{model_name}" if provider else self.model
+
         # If explicitly set to 'langchain', use init_chat_model directly
         if self.gateway_provider == "langchain":
-            return init_chat_model(model=self.model, **config)
+            return init_chat_model(model=effective_model, **config)
 
         if self._is_openrouter:
             # avoid dict rebuild via pop-free filtering
@@ -128,7 +132,7 @@ class LLMConfig(BaseModel):
                 **extra,
             )
 
-        return init_chat_model(model=self.model, **config)
+        return init_chat_model(model=effective_model, **config)
 
 
 class ShellToolConfig(BaseModel):
