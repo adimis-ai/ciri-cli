@@ -15,4 +15,4 @@ output.txt
 node_modules/
 .docusaurus/
 build/
-.ciri-old/
+.ciri/
