@@ -12,8 +12,14 @@ from typing import Optional, Any, Callable
 from .web_researcher import build_web_researcher_agent, CrawlerBrowserConfig
 from ..toolkit import build_script_executor_tool, follow_up_with_human
 
-TOOLKIT_BUILDER_SYSTEM_PROMPT = (
+WORKING_DIR_DEFAULT = get_default_filesystem_root() / ".ciri" / "toolkits"
+
+
+TOOLKIT_BUILDER_SYSTEM_PROMPT_TEMPLATE = (
     """You are the **Lead Toolkit Engineer** for the Ciri agent. Your purpose is to create high-quality, robust **MCP (Model Context Protocol) Servers** (also known as "toolkits") that enable the agent to interact with external services and APIs.
+
+## 📁 WORKING_DIR
+All toolkits you manage and create MUST be located within: `{working_dir}`
 
 ## Core Philosophy: Capability over Complexity
 You focus on creating tools that are intuitive for an AI to use, robust against errors, and provide clear structured data.
@@ -22,7 +28,7 @@ You focus on creating tools that are intuitive for an AI to use, robust against 
 1.  **SKILL USAGE**: You **MUST** use the `mcp-builder` skill for guidance on best practices, project structure, and implementation details.
 2.  **RESEARCH FIRST**: Before writing code, you **MUST** use the `web_researcher_agent` to study the target API documentation. You need to know the endpoints, authentication methods, and data models.
 3.  **DIRECTORY STRUCTURE**:
-    -   All toolkits must be created in `.ciri/toolkits/<toolkit-name>`.
+    -   All toolkits must be created in `{working_dir}/<toolkit-name>`.
     -   **Python (FastMCP)**:
         -   `pyproject.toml`: Must include `fastmcp`.
         -   `src/main.py`: **MANDATORY** entry point for auto-discovery.
@@ -42,7 +48,7 @@ You focus on creating tools that are intuitive for an AI to use, robust against 
 -   Consult `mcp-builder` skill for design patterns.
 
 ### Phase 2: Implementation
--   Create the directory: `.ciri/toolkits/<toolkit-name>`.
+-   Create the directory: `{working_dir}/<toolkit-name>`.
 -   Initialize the project (Python or Node).
 -   **Python**: Use `uv init`, add `fastmcp`.
 -   **Node**: Use `npm init`, add `@modelcontextprotocol/sdk`.
@@ -74,6 +80,7 @@ async def build_toolkit_builder_agent(
     cdp_endpoint: Optional[str] = None,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
     web_researcher_agent: Optional[CompiledSubAgent] = None,
+    working_dir: Optional[Path] = None,
 ) -> CompiledSubAgent:
     # Create the Web Researcher SubAgent (or reuse pre-built one)
     if web_researcher_agent is None:
@@ -84,10 +91,18 @@ async def build_toolkit_builder_agent(
             crawler_browser_config=crawler_browser_config,
         )
 
+    # Effective working directory
+    working_dir = working_dir or WORKING_DIR_DEFAULT
+
     # Path to the mcp-builder skill
     # We use get_default_filesystem_root() to ensure we find the project root correctly
     mcp_builder_path = (
         get_default_filesystem_root() / ".ciri" / "skills" / "mcp-builder"
+    )
+
+    # Format the system prompt with the working directory
+    system_prompt = TOOLKIT_BUILDER_SYSTEM_PROMPT_TEMPLATE.format(
+        working_dir=working_dir
     )
 
     interrupt_on = None
@@ -106,7 +121,7 @@ async def build_toolkit_builder_agent(
         interrupt_on=interrupt_on,
         name="toolkit_builder_agent",
         subagents=[web_researcher_agent],
-        system_prompt=TOOLKIT_BUILDER_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         tools=[build_script_executor_tool(), follow_up_with_human],
         skills=[mcp_builder_path] if mcp_builder_path.exists() else [],
         middleware=[
@@ -126,7 +141,7 @@ async def build_toolkit_builder_agent(
         name="toolkit_builder_agent",
         runnable=toolkit_builder_agent,
         description=(
-            "A specialized SubAgent for creating and managing MCP toolkits (servers).\n"
+            f"A specialized SubAgent for creating and managing MCP toolkits (servers) in {working_dir}.\n"
             "WHEN TO USE: Invoke this agent when the user wants to 'create a toolkit', 'build an MCP server', 'integrate an API', or 'add a new tool source' that involves creating a standalone MCP server.\n"
             "WHY: This agent knows the specific requirements for MCP servers, including `ToolkitInjectionMiddleware` compatibility, directory structure, and dependency management.\n"
             "HOW: Provide a clear task description like 'Create a GitHub toolkit with issue management tools' or 'Build a Stripe integration toolkit'.\n"

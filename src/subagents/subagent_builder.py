@@ -14,8 +14,14 @@ from typing import Optional, Any, Callable
 from .web_researcher import build_web_researcher_agent, CrawlerBrowserConfig
 from ..toolkit import build_script_executor_tool, follow_up_with_human
 
-SUBAGENT_BUILDER_SYSTEM_PROMPT = (
+WORKING_DIR_DEFAULT = get_default_filesystem_root() / ".ciri" / "subagents"
+
+
+SUBAGENT_BUILDER_SYSTEM_PROMPT_TEMPLATE = (
     """You are the **Lead AI Architect** and **SubAgent Specialist** for the Ciri platform. Your purpose is to design and implement specialized SubAgents that extend the capabilities of the primary agent through expert delegation and orchestration.
+
+## 📁 WORKING_DIR
+All subagents you manage and create MUST be located within: `{working_dir}`
 
 ## Core Philosophy: Expert Delegation
 You believe that complex tasks are best solved by specialized experts. You design SubAgents with narrow, clear roles and focused toolsets to maximize reliability and minimize context waste.
@@ -31,10 +37,10 @@ You believe that complex tasks are best solved by specialized experts. You desig
     -   You may set `tools: all` if the subagent requires full tool access, but focused toolsets are preferred.
 
 4.  **SELECTION LOGIC**:
-    -   **Dynamic SubAgents (YAML/JSON)**: Default to this for simple, tool-centric roles. Place in `.ciri/subagents/`.
+    -   **Dynamic SubAgents (YAML/JSON)**: Default to this for simple, tool-centric roles. Place in `{working_dir}/`.
     -   **Compiled SubAgents (Python)**: Use only for complex orchestration, custom logic/scripts, or when the subagent needs its own set of subagents. Place in `src/subagents/`.
 5.  **DIRECTORY STRUCTURE**:
-    -   Dynamic configs: `.ciri/subagents/`.
+    -   Dynamic configs: `{working_dir}/`.
     -   Python implementations: `src/subagents/`.
 6.  **TRIGGER DESIGN**: The `description` of the subagent is its most critical feature. It must be a clear, trigger-complete instruction for the parent agent (e.g., "Use when...").
 
@@ -42,11 +48,11 @@ You believe that complex tasks are best solved by specialized experts. You desig
 
 ### Phase 1: Requirement Analysis
 -   Identify the specific gap in the main agent's capabilities.
--   Research the domain or task using `web_research_agent`.
+-   Research the domain or task using `web_researcher_agent`.
 -   Draft the `system_prompt` and tool list.
 
 ### Phase 2: Implementation
--   **For Dynamic Agents**: Use `write_file` to create a `.yaml` or `.json` in `.ciri/subagents/`.
+-   **For Dynamic Agents**: Use `write_file` to create a `.yaml` or `.json` in `{working_dir}/`.
 -   **For Compiled Agents**:
     -   Create a new Python file in `src/subagents/`.
     -   Follow the factory function pattern (see `skill_builder.py` or `toolkit_builder.py` as reference).
@@ -123,6 +129,7 @@ async def build_subagent_builder_agent(
     cdp_endpoint: Optional[str] = None,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
     web_researcher_agent: Optional[CompiledSubAgent] = None,
+    working_dir: Optional[Path] = None,
 ) -> CompiledSubAgent:
     # Create the Web Researcher SubAgent (or reuse pre-built one)
     if web_researcher_agent is None:
@@ -133,6 +140,9 @@ async def build_subagent_builder_agent(
             crawler_browser_config=crawler_browser_config,
         )
 
+    # Effective working directory
+    working_dir = working_dir or WORKING_DIR_DEFAULT
+
     # Path to the subagent-builder skill
     subagent_builder_path = (
         get_default_filesystem_root() / ".ciri" / "skills" / "subagent-builder"
@@ -141,6 +151,11 @@ async def build_subagent_builder_agent(
     # Path to the skill-creator skill (often useful when building agents that use skills)
     skill_creator_path = (
         get_default_filesystem_root() / ".ciri" / "skills" / "skill-creator"
+    )
+
+    # Format the system prompt with the working directory
+    system_prompt = SUBAGENT_BUILDER_SYSTEM_PROMPT_TEMPLATE.format(
+        working_dir=working_dir
     )
 
     interrupt_on = None
@@ -159,7 +174,7 @@ async def build_subagent_builder_agent(
         interrupt_on=interrupt_on,
         name="subagent_builder_agent",
         subagents=[web_researcher_agent],
-        system_prompt=SUBAGENT_BUILDER_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         tools=[build_script_executor_tool(), follow_up_with_human],
         skills=[p for p in [subagent_builder_path, skill_creator_path] if p.exists()],
         middleware=[
@@ -180,7 +195,7 @@ async def build_subagent_builder_agent(
         name="subagent_builder_agent",
         runnable=subagent_builder_agent,
         description=(
-            "A specialized SubAgent for designing and implementing other SubAgents.\n"
+            f"A specialized SubAgent for designing and implementing other SubAgents in {working_dir}.\n"
             "WHEN TO USE: Invoke this agent when the user wants to 'add a new role', 'create a specialized agent', 'implement a delegated task handler', or 'extend the multi-agent system'.\n"
             "WHY: This agent understands the Ciri subagent architecture (Dynamic vs. Compiled), trigger-based activation, and expert role design.\n"
             "HOW: Provide a task description like 'Create a security auditor subagent that uses the zap-tool' or 'Implement a specialized SQL analyst role'.\n"

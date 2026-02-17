@@ -1,19 +1,25 @@
+from typing import Optional
 from langgraph.errors import GraphInterrupt
 from langgraph.cache.memory import InMemoryCache
 from langchain_core.language_models import BaseChatModel
 from deepagents import create_deep_agent, CompiledSubAgent
 from langchain.agents.middleware import ToolRetryMiddleware
 
-from .._retry_helpers import graphinterrupt_aware_failure
 from ..backend import CiriBackend
 from ..prompts import PLAN_AND_RESEARCH_PROMPT
 from ..utils import get_default_filesystem_root
-from typing import Optional, Any, Callable
+from .._retry_helpers import graphinterrupt_aware_failure
 from .web_researcher import build_web_researcher_agent, CrawlerBrowserConfig
 from ..toolkit import build_script_executor_tool, follow_up_with_human
 
-SKILL_BUILDER_SYSTEM_PROMPT = (
+WORKING_DIR_DEFAULT = get_default_filesystem_root() / ".ciri" / "skills"
+
+
+SKILL_BUILDER_SYSTEM_PROMPT_TEMPLATE = (
     """You are the **Lead Skill Engineer** for the Ciri agent. Your purpose is to extend the agent's capabilities by creating high-quality, reusable **Skills** that encapsulate specialized knowledge and workflows.
+
+## 📁 WORKING_DIR
+All skills you manage and create MUST be located within: `{working_dir}`
 
 ## Core Philosophy: Progressive Disclosure
 You strictly adhere to the **Progressive Disclosure** design principle to manage context window efficiency:
@@ -22,13 +28,13 @@ You strictly adhere to the **Progressive Disclosure** design principle to manage
 3.  **Resources (Loaded on Demand)**: `scripts/`, `references/`, `assets/`. Detailed logic, data, and templates live here.
 
 ## ⚠️ CRITICAL: Mandates & Constraints
-1.  **NO MANUAL CREATION**: You **MUST** use the `execute` tool to run `python3 .ciri/skills/skill-creator/scripts/init_skill.py <skill-name>` to initialize a skill. This ensures correct directory structure and compatibility.
-2.  **NO MANUAL PACKAGING**: You **MUST** use the `execute` tool to run `python3 .ciri/skills/skill-creator/scripts/package_skill.py <skill-path>` to validate and package the skill when finished.
+1.  **NO MANUAL CREATION**: You **MUST** use the `execute` tool to run `python3 {skill_creator_scripts}/init_skill.py <skill-name>` to initialize a skill. This ensures correct directory structure and compatibility.
+2.  **NO MANUAL PACKAGING**: You **MUST** use the `execute` tool to run `python3 {skill_creator_scripts}/package_skill.py <skill-path>` to validate and package the skill when finished.
 3.  **STANDARD LAYOUT**:
-    -   `.ciri/skills/<skill-name>/SKILL.md` (REQUIRED)
-    -   `.ciri/skills/<skill-name>/scripts/` (Executable code)
-    -   `.ciri/skills/<skill-name>/references/` (Documentation/Knowledge)
-    -   `.ciri/skills/<skill-name>/assets/` (Static files/Templates)
+    -   `{working_dir}/<skill-name>/SKILL.md` (REQUIRED)
+    -   `{working_dir}/<skill-name>/scripts/` (Executable code)
+    -   `{working_dir}/<skill-name>/references/` (Documentation/Knowledge)
+    -   `{working_dir}/<skill-name>/assets/` (Static files/Templates)
 4.  **FORBIDDEN FILES**: Do **NOT** create `README.md`, `INSTALL.md`, `requirements.txt` (in root), or other noise. All documentation goes into `SKILL.md` or `references/`.
 5.  **FRONTMATTER**: YAML frontmatter in `SKILL.md` MUST ONLY contain `name` and `description`.
     -   `description`: Max 1024 chars. **Crucial**: Include specific "When to use" triggers here.
@@ -50,7 +56,7 @@ Identify what *types* of resources solve the problem:
 ### Phase 3: Initialization (REQUIRED)
 Use the `execute` tool:
 ```bash
-python3 .ciri/skills/skill-creator/scripts/init_skill.py <skill-name>
+python3 {skill_creator_scripts}/init_skill.py <skill-name>
 ```
 
 ### Phase 4: Implementation
@@ -66,7 +72,7 @@ python3 .ciri/skills/skill-creator/scripts/init_skill.py <skill-name>
 1.  **Verify**: Does the skill directory look right?
 2.  **Package**: Run the validator/packager:
     ```bash
-    python3 .ciri/skills/skill-creator/scripts/package_skill.py .ciri/skills/<skill-name>
+    python3 {skill_creator_scripts}/package_skill.py {working_dir}/<skill-name>
     ```
     *Fix any errors reported by the packager immediately.*
 
@@ -114,6 +120,7 @@ async def build_skill_builder_agent(
     cdp_endpoint: Optional[str] = None,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
     web_researcher_agent: Optional[CompiledSubAgent] = None,
+    working_dir: Optional[Path] = None,
 ) -> CompiledSubAgent:
     # Create the Web Researcher SubAgent (or reuse pre-built one)
     if web_researcher_agent is None:
@@ -124,10 +131,21 @@ async def build_skill_builder_agent(
             crawler_browser_config=crawler_browser_config,
         )
 
+    # Effective working directory
+    working_dir = working_dir or WORKING_DIR_DEFAULT
+
     # Path to the skill-creator skill
     # We use get_default_filesystem_root() to ensure we find the project root correctly
     skill_creator_path = (
         get_default_filesystem_root() / ".ciri" / "skills" / "skill-creator"
+    )
+
+    skill_creator_scripts = skill_creator_path / "scripts"
+
+    # Format the system prompt with the working directory
+    system_prompt = SKILL_BUILDER_SYSTEM_PROMPT_TEMPLATE.format(
+        working_dir=working_dir,
+        skill_creator_scripts=skill_creator_scripts,
     )
 
     interrupt_on = None
@@ -146,7 +164,7 @@ async def build_skill_builder_agent(
         name="skill_builder_agent",
         interrupt_on=interrupt_on,
         subagents=[web_researcher_agent],
-        system_prompt=SKILL_BUILDER_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         tools=[build_script_executor_tool(), follow_up_with_human],
         skills=[skill_creator_path] if skill_creator_path.exists() else [],
         middleware=[
@@ -166,7 +184,7 @@ async def build_skill_builder_agent(
         name="skill_builder_agent",
         runnable=skill_builder_agent,
         description=(
-            "A specialized SubAgent for creating and managing AI skills in .ciri/skills.\n"
+            f"A specialized SubAgent for creating and managing AI skills in {working_dir}.\n"
             "WHEN TO USE: Invoke this agent when the user explicitly asks to 'create a skill', 'update a skill', 'build a new capability', or 'add a new tool' that involves creating a reusable skill package.\n"
             "WHY: This agent enforces the required .ciri/skills structure, uses the mandatory `init_skill.py` script, and ensures `SkillsMiddleware` compatibility.\n"
             "HOW: Provide a clear task description like 'Create a new pdf-processing skill' or 'Update the web-research skill to support deeper crawling'.\n"
