@@ -9,7 +9,6 @@ data/
 build/
 dist/
 *.spec
-.ciri/
 .claude/
 notes/
 output.txt
