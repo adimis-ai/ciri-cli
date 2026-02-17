@@ -114,37 +114,33 @@ async def create_copilot(
         subagents = []
 
     # --- Launch the user's real browser and get the CDP endpoint ---
-    # Resolve the browser profile info for --user-data-dir / --profile-directory
+    # Chrome v136+ blocks CDP connections to the user's default profile
+    # directory for security.  `resolve_browser_profile()` copies the
+    # profile to a CIRI-managed directory which is exempt from this
+    # restriction.  We MUST use the *copied* user-data-dir for launch.
     cdp_endpoint: str | None = None
-    profile_info = None
-    if not is_wsl() and not browser_profile_directory:
+    cdp_user_data_dir = None
+
+    if not is_wsl():
         profile_info = resolve_browser_profile(browser_name, browser_profile_directory)
         if profile_info:
+            cdp_user_data_dir = profile_info["user_data_dir"]  # copied dir
             browser_profile_directory = profile_info["profile_directory"]
             browser_name = profile_info["browser"]
-
-    # Determine the real user_data_dir for the browser profiles
-    real_user_data_dir = None
-    if profile_info:
-        # Use the ORIGINAL user_data_dir from detect_browser_profiles
-        # (not the copied one — we want the real browser)
-        profiles = detect_browser_profiles()
-        for p in profiles:
-            if p["browser"] == profile_info.get("browser") and p["profile_directory"] == browser_profile_directory:
-                real_user_data_dir = p["user_data_dir"]
-                break
 
     try:
         cdp_endpoint = launch_browser_with_cdp(
             browser_name=browser_name,
-            user_data_dir=real_user_data_dir,
+            user_data_dir=cdp_user_data_dir,
             profile_directory=browser_profile_directory,
         )
     except RuntimeError:
         import logging as _logging
+
         _logging.getLogger(__name__).warning(
             "Could not launch browser with CDP — web browsing tools will be unavailable. "
             "You can manually start Chrome/Edge with --remote-debugging-port=9222 and restart CIRI.",
+            exc_info=True,
         )
 
     if cdp_endpoint and not crawler_browser_config:

@@ -565,17 +565,20 @@ def is_cdp_port_open(port: int = 9222) -> bool:
     """Return ``True`` if a CDP-enabled browser is listening on *port*.
 
     Uses an HTTP GET to ``/json/version`` — the standard CDP discovery
-    endpoint — instead of a raw TCP socket.  This avoids IPv4/IPv6
-    mismatches on Windows where Chrome may bind to ``::1`` while a raw
-    socket connects to ``127.0.0.1``.
+    endpoint.  Tries ``127.0.0.1`` first (IPv4) then ``localhost`` so
+    we handle both Chrome's default binding and edge-cases where the
+    browser listens only on IPv6.
     """
-    url = f"http://localhost:{port}/json/version"
-    try:
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            return resp.status == 200
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
+    for host in ("127.0.0.1", "localhost"):
+        url = f"http://{host}:{port}/json/version"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                if resp.status == 200:
+                    return True
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+    return False
 
 
 def _kill_browser_processes(exe_path: str) -> bool:
@@ -583,9 +586,12 @@ def _kill_browser_processes(exe_path: str) -> bool:
 
     On Windows this uses ``taskkill /IM <name>``.  On Linux/macOS it uses
     ``pkill -f``.  Returns ``True`` if any processes were found and a
-    termination signal was sent.
+    termination signal was sent.  Waits until all matching processes have
+    actually exited (up to 15 s on Windows, 8 s elsewhere).
     """
-    exe_basename = Path(exe_path).name.lower()  # e.g. "chrome.exe", "google-chrome-stable"
+    exe_basename = Path(
+        exe_path
+    ).name.lower()  # e.g. "chrome.exe", "google-chrome-stable"
 
     try:
         if sys.platform == "win32":
@@ -608,10 +614,22 @@ def _kill_browser_processes(exe_path: str) -> bool:
 
         if killed:
             logger.info("Terminated existing %s processes", exe_basename)
-            # Give the OS a moment to release profile locks and ports.
-            # Windows needs longer than Linux to release file locks on the
-            # user-data-dir and free the TCP port.
-            _time.sleep(4 if sys.platform == "win32" else 2)
+            # Poll until the processes are truly gone, rather than using a
+            # fixed sleep.  On Windows, profile locks and TCP ports may not
+            # be released until the kernel has fully reaped the process.
+            max_wait = 15 if sys.platform == "win32" else 8
+            for _ in range(max_wait * 2):  # check every 0.5 s
+                if not _is_browser_running(exe_path):
+                    break
+                _time.sleep(0.5)
+            else:
+                logger.warning(
+                    "%s processes still running after %ds — proceeding anyway",
+                    exe_basename,
+                    max_wait,
+                )
+            # Extra grace period for the OS to release file locks / ports
+            _time.sleep(1)
         return killed
 
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
@@ -707,7 +725,6 @@ def launch_browser_with_cdp(
     args: list[str] = [
         exe,
         f"--remote-debugging-port={port}",
-        "--remote-debugging-address=127.0.0.1",
         *_CDP_LAUNCH_ARGS,
     ]
     if user_data_dir:
@@ -717,9 +734,13 @@ def launch_browser_with_cdp(
 
     logger.info("Launching browser for CDP: %s", " ".join(args))
 
-    # Launch as a fully detached process so it survives CIRI exit
+    # Launch as a fully detached process so it survives CIRI exit.
+    # On Windows, DETACHED_PROCESS makes pipes unreliable, so we use
+    # DEVNULL for stderr there and skip the proc.poll() early-exit
+    # check (poll() is unreliable for fully detached processes).
     kwargs: dict = {}
-    if sys.platform == "win32":
+    is_win = sys.platform == "win32"
+    if is_win:
         # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
         kwargs["creationflags"] = (
             subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
@@ -730,20 +751,22 @@ def launch_browser_with_cdp(
     proc = subprocess.Popen(
         args,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL if is_win else subprocess.PIPE,
         **kwargs,
     )
 
     # Wait for the debugging port to become reachable.
     # Windows often needs extra time after a kill/relaunch cycle.
-    effective_timeout = timeout if sys.platform != "win32" else max(timeout, 30.0)
+    effective_timeout = timeout if not is_win else max(timeout, 30.0)
     deadline = _time.monotonic() + effective_timeout
     while _time.monotonic() < deadline:
         if is_cdp_port_open(port):
             logger.info("CDP endpoint ready at %s", endpoint)
             return endpoint
-        # Check if the process died early
-        if proc.poll() is not None:
+        # Check if the process died early (skip on Windows — poll() is
+        # unreliable for DETACHED_PROCESS and may return None even after
+        # the process has exited).
+        if not is_win and proc.poll() is not None:
             stderr_out = ""
             if proc.stderr:
                 try:
