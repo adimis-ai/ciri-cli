@@ -13,6 +13,8 @@ from .web_researcher import build_web_researcher_agent, CrawlerBrowserConfig
 from ..toolkit import build_script_executor_tool, follow_up_with_human
 
 WORKING_DIR_DEFAULT = get_default_filesystem_root() / ".ciri" / "skills"
+TOOLKITS_DIR_DEFAULT = get_default_filesystem_root() / ".ciri" / "toolkits"
+SUBAGENTS_DIR_DEFAULT = get_default_filesystem_root() / ".ciri" / "subagents"
 
 
 SKILL_BUILDER_SYSTEM_PROMPT_TEMPLATE = (
@@ -20,6 +22,32 @@ SKILL_BUILDER_SYSTEM_PROMPT_TEMPLATE = (
 
 ## 📁 WORKING_DIR
 All skills you manage and create MUST be located within: `{working_dir}`
+
+## 📁 TOOLKITS_DIR
+Available toolkits are located in: `{toolkits_dir}`
+
+## 📁 SUBAGENTS_DIR
+Available subagents are located in: `{subagents_dir}`
+
+## 🧩 Orchestration: Toolkits & SubAgents
+Skills can orchestrate multiple toolkits and subagents by defining a sequence of tasks.
+1. **Toolkits**: Broad capabilities (e.g., `web-search`, `filesystem`). Refer to them by their name or path in `{toolkits_dir}`.
+2. **SubAgents**: Specialized roles (e.g., `researcher`, `coder`). Refer to them by their name or path in `{subagents_dir}`.
+3. **Task Sequences**: Use the `task` tool (available to the agent loading this skill) to define, track, and execute sequences of actions.
+
+### Example Orchestration in `SKILL.md`:
+```markdown
+### Complex Analysis Workflow
+1. **Initialize Research**:
+   - Use `task add "Researching <topic> using web_research_agent"` to track progress.
+   - Use `web_research_agent` to gather raw data.
+2. **Process Data**:
+   - Use `task add "Processing data with specialized toolkit"`
+   - Call tools from the relevant toolkit in `{toolkits_dir}`.
+3. **Verify results**:
+   - Use `task complete "Researching <topic>"`
+   - Finalize documentation.
+```
 
 ## Core Philosophy: Progressive Disclosure
 You strictly adhere to the **Progressive Disclosure** design principle to manage context window efficiency:
@@ -121,6 +149,8 @@ async def build_skill_builder_agent(
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
     web_researcher_agent: Optional[CompiledSubAgent] = None,
     working_dir: Optional[Path] = None,
+    toolkits_dir: Optional[Path] = None,
+    subagents_dir: Optional[Path] = None,
 ) -> CompiledSubAgent:
     # Create the Web Researcher SubAgent (or reuse pre-built one)
     if web_researcher_agent is None:
@@ -131,8 +161,10 @@ async def build_skill_builder_agent(
             crawler_browser_config=crawler_browser_config,
         )
 
-    # Effective working directory
+    # Effective working directories
     working_dir = working_dir or WORKING_DIR_DEFAULT
+    toolkits_dir = toolkits_dir or TOOLKITS_DIR_DEFAULT
+    subagents_dir = subagents_dir or SUBAGENTS_DIR_DEFAULT
 
     # Path to the skill-creator skill
     # We use get_default_filesystem_root() to ensure we find the project root correctly
@@ -142,9 +174,11 @@ async def build_skill_builder_agent(
 
     skill_creator_scripts = skill_creator_path / "scripts"
 
-    # Format the system prompt with the working directory
+    # Format the system prompt with the working directories
     system_prompt = SKILL_BUILDER_SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
+        toolkits_dir=toolkits_dir,
+        subagents_dir=subagents_dir,
         skill_creator_scripts=skill_creator_scripts,
     )
 
