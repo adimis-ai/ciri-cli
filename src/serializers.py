@@ -51,11 +51,16 @@ class LLMConfig(BaseModel):
             return tuple(self.model.split("/", 1))
         if ":" in self.model:  # langchain direct provider:model
             return tuple(self.model.split(":", 1))
+        if "/" in self.model:  # support provider/model even if NOT openrouter
+            return tuple(self.model.split("/", 1))
         return None, self.model
 
     @cached_property
     def _is_openrouter(self) -> bool:
         # OpenRouter models are consistently identified by 'provider/model'
+        # BUT we only treat them as OpenRouter if the gateway provider is openrouter
+        if self.gateway_provider != "openrouter":
+            return False
         return "/" in self.model
 
     @cached_property

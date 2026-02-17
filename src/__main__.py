@@ -10,6 +10,7 @@ import asyncio
 import argparse
 import aiosqlite
 from pathlib import Path
+from dotenv import load_dotenv
 from typing import Optional, List, Any, Dict, Union
 
 # Third-party imports
@@ -63,6 +64,8 @@ from .utils import (
 from .copilot import create_copilot
 from .controller import CopilotController
 from .serializers import LLMConfig
+
+load_dotenv()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -197,6 +200,12 @@ def _persist_env_var(name: str, value: str) -> list[str]:
 
 def ensure_openrouter_api_key() -> None:
     """Check for OPENROUTER_API_KEY; prompt and persist if missing."""
+
+    # If gateway is NOT 'openrouter', skip this mandatory check
+    gateway = os.getenv("LLM_GATEWAY_PROVIDER", "openrouter")
+    if gateway != "openrouter":
+        return
+
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if api_key:
         return
