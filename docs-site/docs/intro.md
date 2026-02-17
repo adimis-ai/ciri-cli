@@ -10,15 +10,12 @@ Use the sidebar to navigate topics. If a page references code or files, paths ar
 
 ```mermaid
 flowchart LR
-  A[User Terminal] --> B[CLI (ciri)]
+  A[User Terminal] --> B[CLI]
   B --> C[Copilot Graph]
   C --> D[LLM Providers]
   C --> E[Skills & Toolkits]
   C --> F[Subagents]
-  C --> G[Local DB (SQLite)]
-  style A fill:#f9f,stroke:#333,stroke-width:1px
-  style B fill:#b6e3ff,stroke:#333
-  style C fill:#ffdcb1,stroke:#333
-  style D fill:#d1f7c4,stroke:#333
+  C --> G[Local DB]
 ```
+
 
