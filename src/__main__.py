@@ -1610,7 +1610,7 @@ class CopilotCLI:
 
     # ── Interrupt Handling ────────────────────────────────────────────────
 
-    def _prompt_multiline(self, label: str, default: str = "") -> str:
+    async def _prompt_multiline(self, label: str, default: str = "") -> str:
         """Prompt for input with multiline support (Alt+Enter for new line).
 
         Uses a dedicated prompt_toolkit PromptSession that shares the same
@@ -1622,7 +1622,7 @@ class CopilotCLI:
             multiline=True,
         )
         try:
-            result = session.prompt(
+            result = await session.prompt_async(
                 HTML(f"<ansicyan><b>{label}</b></ansicyan>"),
                 default=default,
             )
@@ -1630,7 +1630,7 @@ class CopilotCLI:
         except (EOFError, KeyboardInterrupt):
             return default
 
-    def _handle_follow_up_interrupt(self, interrupt_value: dict) -> list:
+    async def _handle_follow_up_interrupt(self, interrupt_value: dict) -> list:
         """Handle human_follow_up interrupt - ask user clarification questions."""
         queries = interrupt_value.get("queries", [])
         if not queries:
@@ -1659,7 +1659,7 @@ class CopilotCLI:
                     console.print(f"    [dim]{j}.[/] {opt}")
                 console.print()
 
-                answer = self._prompt_multiline("  Enter number or type your answer > ")
+                answer = await self._prompt_multiline("  Enter number or type your answer > ")
 
                 # Resolve numbered selection
                 try:
@@ -1671,12 +1671,12 @@ class CopilotCLI:
 
                 responses.append(answer)
             else:
-                answer = self._prompt_multiline("  Your answer > ")
+                answer = await self._prompt_multiline("  Your answer > ")
                 responses.append(answer)
 
         return responses
 
-    def _handle_script_execution_interrupt(
+    async def _handle_script_execution_interrupt(
         self, interrupt_value: dict
     ) -> Union[str, dict]:
         """Handle script_execution interrupt - approve/reject/edit script."""
@@ -1714,20 +1714,20 @@ class CopilotCLI:
         )
 
         if decision in ("reject", "r"):
-            reason = self._prompt_multiline("  Reason (optional) > ")
+            reason = await self._prompt_multiline("  Reason (optional) > ")
             return {"status": "rejected", "reason": reason}
         elif decision in ("edit", "e"):
             console.print(
                 "  [dim]Edit the script below (Alt+Enter for new line, Enter to submit):[/]"
             )
-            edited_script = self._prompt_multiline("  Script > ", default=script)
+            edited_script = await self._prompt_multiline("  Script > ", default=script)
             if edited_script.strip():
                 return {"status": "edited", "script_content": edited_script}
             console.print("  [yellow]Empty script, approving original.[/]")
 
         return "approved"
 
-    def _handle_hitl_interrupt(self, interrupt_value: dict) -> dict:
+    async def _handle_hitl_interrupt(self, interrupt_value: dict) -> dict:
         """Handle HumanInTheLoopMiddleware tool approval interrupts."""
         review_configs = interrupt_value.get("review_configs", [])
         action_requests = interrupt_value.get("action_requests", [])
@@ -1830,7 +1830,7 @@ class CopilotCLI:
             if decision == "approve":
                 decisions.append({"type": "approve"})
             elif decision == "reject":
-                reason = self._prompt_multiline("  Reason (optional) > ")
+                reason = await self._prompt_multiline("  Reason (optional) > ")
                 d = {"type": "reject"}
                 if reason:
                     d["message"] = reason
@@ -1840,7 +1840,7 @@ class CopilotCLI:
                     "  [dim]Enter edited arguments as JSON (Alt+Enter for new line):[/]"
                 )
                 default_json = json.dumps(args, indent=2, default=str)
-                raw = self._prompt_multiline("  JSON > ", default=default_json)
+                raw = await self._prompt_multiline("  JSON > ", default=default_json)
                 try:
                     edited_args = json.loads(raw)
                     decisions.append(
@@ -1857,16 +1857,16 @@ class CopilotCLI:
 
         return {"decisions": decisions}
 
-    def _handle_interrupt(self, interrupt_data: dict) -> Any:
+    async def _handle_interrupt(self, interrupt_data: dict) -> Any:
         """Route an interrupt to the appropriate handler and return the resume value."""
         interrupt_type = interrupt_data.get("type", "")
 
         if interrupt_type == "human_follow_up":
-            return self._handle_follow_up_interrupt(interrupt_data)
+            return await self._handle_follow_up_interrupt(interrupt_data)
         elif interrupt_type == "script_execution":
-            return self._handle_script_execution_interrupt(interrupt_data)
+            return await self._handle_script_execution_interrupt(interrupt_data)
         elif "review_configs" in interrupt_data or "action_requests" in interrupt_data:
-            return self._handle_hitl_interrupt(interrupt_data)
+            return await self._handle_hitl_interrupt(interrupt_data)
         else:
             # Unknown interrupt - show raw and ask for JSON response
             console.print()
@@ -1883,7 +1883,7 @@ class CopilotCLI:
                     padding=(0, 1),
                 )
             )
-            raw = self._prompt_multiline("  Respond (JSON or text) > ")
+            raw = await self._prompt_multiline("  Respond (JSON or text) > ")
             try:
                 return json.loads(raw)
             except json.JSONDecodeError:
@@ -2064,7 +2064,7 @@ class CopilotCLI:
             console.print(Rule("[bold cyan]Interrupt[/]", style="cyan"))
 
             # Handle the interrupt
-            resume_value = self._handle_interrupt(interrupt_data)
+            resume_value = await self._handle_interrupt(interrupt_data)
 
             # Resume the graph with the user's response
             console.print()
