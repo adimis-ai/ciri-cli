@@ -2167,7 +2167,10 @@ class CopilotCLI:
                     if not stream_task.done():
                         stream_task.cancel()
 
-                loop.add_signal_handler(signal.SIGINT, _cancel_stream)
+                try:
+                    loop.add_signal_handler(signal.SIGINT, _cancel_stream)
+                except NotImplementedError:
+                    pass  # Windows doesn't support signal handlers in asyncio
 
                 try:
                     await stream_task
@@ -2176,7 +2179,10 @@ class CopilotCLI:
                     self._last_ctrl_c_time = time.monotonic()
                     console.print("\n  [yellow]Interrupted.[/]")
                 finally:
-                    loop.remove_signal_handler(signal.SIGINT)
+                    try:
+                        loop.remove_signal_handler(signal.SIGINT)
+                    except NotImplementedError:
+                        pass
             except Exception as e:
                 console.print(f"\n  [bold red]Error:[/] {e}")
             finally:
