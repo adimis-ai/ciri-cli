@@ -1,7 +1,0 @@
-{
-  "name": "project-onboarding-ciri",
-  "description": "Onboarding guide for contributors to the CIRI Copilot repo; contains concise lessons and commands.",
-  "entrypoint": "SKILL.md",
-  "version": "0.1.0",
-  "author": "ciri-self-trainer"
-}

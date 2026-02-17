@@ -43,8 +43,8 @@ CIRI is a local CLI application that helps users interact with AI models and too
 
 - Interactive AI chat with streaming responses
 - Thread-based conversation management (save, switch, delete threads)
-- File- and skills-aware autocompletion (type `@` for paths, `@skills:` for skills)
-- Model selection (choose an available OpenRouter model)
+- File- and skills-aware autocompletion (type `@files:` for paths, `@skills:` for skills, etc.)
+- Model selection (choose an available provider model)
 - Human-in-the-loop tool execution (approve, reject, or edit tool actions)
 - Local encrypted storage for conversation data
 - Extensible skills and toolkit architecture
@@ -108,8 +108,6 @@ git clone git@github.com:adimis-ai/ciri.git
 cd ciri
 ```
 
-Or HTTPS:
-
 ```bash
 git clone https://github.com/adimis-ai/ciri.git
 cd ciri
@@ -134,17 +132,6 @@ uv sync
 # install package in editable mode
 uv pip install -e .
 ```
-
-Option 3 — Remote / Private Repo (One-command install):
-
-If you want to install `ciri` on another machine without making the repo public, you can use `uv` with a GitHub Personal Access Token (PAT):
-
-```bash
-uv tool install git+https://<YOUR_PAT>@github.com/adimis-ai/ciri.git --force
-```
-
-> [!TIP]
-> Use the `--force` flag (as shown above) to ensure you always pull the latest changes from the repository if you already have the tool installed.
 
 ---
 
@@ -186,10 +173,11 @@ On first run you will be prompted for an API key and asked to choose a model. Th
 
 Common interactions
 
-- Refer to a file: type `@` then a file path fragment to trigger autocomplete
+- Refer to a file: type `@files:` then a file path fragment to trigger autocomplete
 - List threads: `/threads`
 - New thread: `/new-thread`
-- Change model: `/model [name]`
+- Change model: `/change-model [name]`
+- Sync workspace: `/sync`
 - Exit: `exit`, `quit`, or `bye`
 
 Example session
@@ -212,7 +200,9 @@ Goodbye!
 - `/threads` — list and switch conversation threads
 - `/new-thread` — create a new conversation thread
 - `/delete-thread` — delete the current thread
-- `/model [name]` — switch to a different model
+- `/change-model [name]` — switch to a different model
+- `/change-browser-profile` — change the active browser profile
+- `/sync` — analyze workspace & self-train
 
 **Keyboard shortcuts**
 

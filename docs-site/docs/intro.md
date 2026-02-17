@@ -23,7 +23,7 @@ flowchart TD
   Graph <--> Trainer
 ```
 
-Use the sidebar to navigate topics. If a page references code or files, paths are relative to the project root where the repo is checked out.
+Use the sidebar to navigate topics. For code analysis, use `@files:` or `@folders:` followed by the path.
 
 ## Helpful Links
 - **[Getting Started](getting-started.md)**: Quick installation and first run.

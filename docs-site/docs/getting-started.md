@@ -12,8 +12,8 @@ This guide will help you set up a local development environment for CIRI.
 
 1. **Clone the repository**:
    ```bash
-   git clone git@github.com:adimis-ai/ciri-cli-v1.git
-   cd ciri-cli-v1
+   git clone https://github.com/adimis-ai/ciri.git
+   cd ciri
    ```
 
 2. **Sync dependencies**:
