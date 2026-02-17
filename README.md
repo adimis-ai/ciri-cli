@@ -41,13 +41,14 @@ CIRI is a local CLI application that helps users interact with AI models and too
 
 ## Features
 
-- Interactive AI chat with streaming responses
-- Thread-based conversation management (save, switch, delete threads)
-- File- and skills-aware autocompletion (type `@files:` for paths, `@skills:` for skills, etc.)
-- Model selection (choose an available provider model)
-- Human-in-the-loop tool execution (approve, reject, or edit tool actions)
-- Local encrypted storage for conversation data
-- Extensible skills and toolkit architecture
+- **Interactive AI Chat**: Streaming responses with rich terminal formatting.
+- **Multi-Provider Support**: Seamless integration with OpenRouter or direct providers (Anthropic, OpenAI, Google, etc.) via LangChain.
+- **Thread-Based Management**: Save, switch, and delete conversation threads locally.
+- **Deep Contextual Autocompletion**: High-performance autocompletion for `@files:`, `@folders:`, `@skills:`, `@toolkits:`, and `@subagents:`.
+- **Self-Evolution**: Ciri can analyze its workspace and register new skills, toolkits, and subagents on the fly.
+- **Human-in-the-Loop (HITL)**: Approve, reject, or edit tool actions (shell commands, file edits) before they execute.
+- **Local Storage**: Checkpoint and conversation history stored in a local SQLite database.
+- **Extensible Architecture**: Easily add new skills and toolkits.
 
 ## Who should use it
 
@@ -137,24 +138,24 @@ uv pip install -e .
 
 ## Configuration
 
-### OpenRouter API key
+### API Keys
 
-CIRI uses OpenRouter (or compatible providers) for model access. Obtain an API key from https://openrouter.ai/ and provide it either when prompted on first run or via environment variable / `.env` file.
+CIRI supports multiple providers. By default, it uses **OpenRouter**, but you can use any provider supported by LangChain (OpenAI, Anthropic, Google, Mistral, etc.).
 
-Set per-session (temporary):
+- **Interactive Setup**: If an API key is missing for your chosen model, CIRI will prompt you to enter it on startup and offer to persist it globally in `~/.ciri/.env` and your shell profile.
+- **Environment Variables**: You can also set them manually:
+  ```bash
+  export OPENROUTER_API_KEY="your-key"
+  export ANTHROPIC_API_KEY="your-key"
+  # etc.
+  ```
+
+### Model Gateway
+
+You can switch between `langchain` (default) and `openrouter` gateways via the `LLM_GATEWAY_PROVIDER` variable.
 
 ```bash
-# Linux/macOS
-export OPENROUTER_API_KEY="your-api-key-here"
-
-# Windows PowerShell
-$env:OPENROUTER_API_KEY="your-api-key-here"
-```
-
-Or store in a `.env` file at the repo root (ignored by git):
-
-```bash
-echo 'OPENROUTER_API_KEY=your-api-key-here' > .env
+export LLM_GATEWAY_PROVIDER="langchain" # Supports provider:model format
 ```
 
 **Security note:** do not commit API keys to version control.
@@ -169,16 +170,16 @@ Start the CLI:
 ciri
 ```
 
-On first run you will be prompted for an API key and asked to choose a model. The chat UI supports streaming responses and inline autocompletion.
+On first run, you will be guided through model and browser profile selection.
 
-Common interactions
+### Common interactions
 
-- Refer to a file: type `@files:` then a file path fragment to trigger autocomplete
-- List threads: `/threads`
-- New thread: `/new-thread`
-- Change model: `/change-model [name]`
-- Sync workspace: `/sync`
-- Exit: `exit`, `quit`, or `bye`
+- **Reference Files**: Type `@files:` then a path fragment.
+- **Reference Folders**: Type `@folders:` then a path fragment.
+- **Use Skills**: Type `@skills:` to see available local skills.
+- **Sync Workspace**: Run `/sync` to let Ciri discover your local setup.
+- **Change Model**: Run `/change-model` to switch AI providers/models.
+- **Manage Threads**: Use `/threads` to list or `/new-thread` to start fresh.
 
 Example session
 
@@ -195,14 +196,19 @@ Goodbye!
 
 ---
 
-## Commands reference (short)
+## Commands Reference
 
-- `/threads` — list and switch conversation threads
-- `/new-thread` — create a new conversation thread
-- `/delete-thread` — delete the current thread
-- `/change-model [name]` — switch to a different model
-- `/change-browser-profile` — change the active browser profile
-- `/sync` — analyze workspace & self-train
+| Command | Description |
+| :--- | :--- |
+| `/threads` | List all conversation threads. |
+| `/switch-thread` | Interactively switch to another thread. |
+| `/new-thread` | Start a new conversation thread. |
+| `/delete-thread` | Delete the current thread history. |
+| `/change-model` | Change the active LLM model. |
+| `/change-browser-profile` | Switch browser profiles for research. |
+| `/sync` | Analyze workspace & register skills/subagents. |
+| `/help` | Show the help menu. |
+| `/exit` | Exit the CLI. |
 
 **Keyboard shortcuts**
 

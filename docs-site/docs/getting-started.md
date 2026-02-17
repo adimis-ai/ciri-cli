@@ -27,23 +27,30 @@ This guide will help you set up a local development environment for CIRI.
    ```
 
 4. **Configure Environment Variables**:
-   Create a `.env` file in the project root. At minimum, you need an API key for your chosen provider.
+   While CIRI can prompt you for missing API keys interactively, you can also set them in a `.env` file at the project root for convenience.
 
-   **If using OpenRouter (Default):**
+   **Standard Configuration (Multi-Provider via LangChain):**
+   CIRI uses `langchain` as the default gateway, supporting OpenAI, Anthropic, Google, and more.
    ```bash
-   OPENROUTER_API_KEY=your_key_here
+   # Set the gateway (optional, defaults to langchain)
+   LLM_GATEWAY_PROVIDER=langchain
+
+   # Set provider-specific keys
+   OPENAI_API_KEY=your_key_here
+   ANTHROPIC_API_KEY=your_key_here
    ```
 
-   **If using a direct provider (e.g., Anthropic via LangChain):**
+   **Using OpenRouter Gateway:**
    ```bash
-   LLM_GATEWAY_PROVIDER=langchain
-   ANTHROPIC_API_KEY=your_key_here
+   LLM_GATEWAY_PROVIDER=openrouter
+   OPENROUTER_API_KEY=your_key_here
    ```
 
 5. **Run CIRI**:
    ```bash
    ciri
    ```
+   On first run, CIRI will walk you through choosing a model and setting up your browser profile.
 
 ## Windows Notes
 - Use PowerShell and set environment variables via `$env:VARIABLE_NAME = "value"`.

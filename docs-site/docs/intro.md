@@ -2,7 +2,7 @@
 
 Welcome to the official CIRI Copilot documentation. 
 
-**Ciri** is an autonomous, self-evolving AI copilot that lives inside your workspace. Unlike traditional static tools, Ciri can permanently expand its own capabilities by creating new Skills, Toolkits, and SubAgents as it learns about your environment.
+**Ciri** is an autonomous, self-evolving AI copilot that lives inside your workspace. Powered by a flexible multi-provider backend, Ciri can permanently expand its own capabilities by creating new Skills, Toolkits, and SubAgents as it learns about your environment.
 
 ## Quick architecture map
 

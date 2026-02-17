@@ -38,11 +38,12 @@ class LLMConfig(BaseModel):
     """Configuration for language models."""
 
     model: str = Field(
-        description="The language model to use, e.g. 'openai/gpt-5-mini' or 'openai:gpt-4'."
+        description="The language model to use, e.g. 'openai/gpt-5-mini' or 'openai:gpt-5-mini'. "
+        "For langchain gateway, 'provider/model' is auto-converted to 'provider:model'."
     )
     model_kwargs: Dict[str, Any] = Field(default_factory=dict)
     gateway_provider: Optional[str] = Field(
-        default_factory=lambda: os.getenv("LLM_GATEWAY_PROVIDER", "openrouter")
+        default_factory=lambda: os.getenv("LLM_GATEWAY_PROVIDER", "langchain")
     )
 
     @cached_property

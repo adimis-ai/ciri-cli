@@ -103,7 +103,7 @@ KEYBOARD_SHORTCUTS = {
     "↑ / ↓": "Browse history",
 }
 
-DEFAULT_MODEL = "openai/gpt-5-mini"
+DEFAULT_MODEL = "openai/gpt-5-mini"  # user-facing format: provider/model
 
 console = Console()
 
@@ -200,41 +200,89 @@ def _persist_env_var(name: str, value: str) -> list[str]:
     return messages
 
 
-def ensure_openrouter_api_key() -> None:
-    """Check for OPENROUTER_API_KEY; prompt and persist if missing."""
+def _extract_provider_from_model(model: str) -> str | None:
+    """Extract the provider name from a model string like 'openai/gpt-5-mini' or 'openai:gpt-5-mini'."""
+    if "/" in model:
+        return model.split("/", 1)[0]
+    if ":" in model:
+        return model.split(":", 1)[0]
+    return None
 
-    # If gateway is NOT 'openrouter', skip this mandatory check
-    gateway = os.getenv("LLM_GATEWAY_PROVIDER", "openrouter")
-    if gateway != "openrouter":
-        return
 
-    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+def _normalize_model_for_langchain(model: str) -> str:
+    """Convert 'provider/model_name' to 'provider:model_name' for LangChain's init_chat_model."""
+    if "/" in model:
+        return model.replace("/", ":", 1)
+    return model
+
+
+# Well-known provider API key links
+_PROVIDER_KEY_URLS: dict[str, str] = {
+    "openai": "https://platform.openai.com/api-keys",
+    "anthropic": "https://console.anthropic.com/settings/keys",
+    "google": "https://aistudio.google.com/apikey",
+    "google_genai": "https://aistudio.google.com/apikey",
+    "mistralai": "https://console.mistral.ai/api-keys",
+    "cohere": "https://dashboard.cohere.com/api-keys",
+    "groq": "https://console.groq.com/keys",
+    "fireworks": "https://fireworks.ai/account/api-keys",
+    "together": "https://api.together.ai/settings/api-keys",
+    "deepseek": "https://platform.deepseek.com/api_keys",
+    "openrouter": "https://openrouter.ai/keys",
+}
+
+
+def ensure_provider_api_key(model: str) -> None:
+    """Ensure the API key for the model's provider is set; prompt and persist if missing.
+
+    For openrouter gateway, checks OPENROUTER_API_KEY.
+    For langchain gateway, extracts the provider from the model string and checks
+    {PROVIDER}_API_KEY (e.g., OPENAI_API_KEY, ANTHROPIC_API_KEY).
+    """
+    gateway = os.getenv("LLM_GATEWAY_PROVIDER", "langchain")
+
+    if gateway == "openrouter":
+        env_key = "OPENROUTER_API_KEY"
+        provider_display = "OpenRouter"
+        key_url = _PROVIDER_KEY_URLS.get("openrouter", "")
+    else:
+        # LangChain direct provider — derive key name from model string
+        provider = _extract_provider_from_model(model)
+        if not provider:
+            return  # Can't determine provider; let init_chat_model handle it
+        env_key = f"{provider.upper()}_API_KEY"
+        provider_display = provider.capitalize()
+        key_url = _PROVIDER_KEY_URLS.get(provider.lower(), "")
+
+    api_key = os.getenv(env_key, "").strip()
     if api_key:
         return
 
     console.print()
+    url_hint = (
+        f"\nGet one at [link={key_url}]{key_url}[/link]" if key_url else ""
+    )
     console.print(
         Panel(
-            "[bold yellow]OPENROUTER_API_KEY[/] is not set.\n"
-            "You need an OpenRouter API key to use CIRI.\n"
-            "Get one at [link=https://openrouter.ai/keys]https://openrouter.ai/keys[/link]",
+            f"[bold yellow]{env_key}[/] is not set.\n"
+            f"You need a {provider_display} API key to use CIRI with this model.{url_hint}",
             title="[bold red]API Key Required[/]",
             border_style="red",
         )
     )
     console.print()
 
-    api_key = Prompt.ask("  [bold cyan]Enter your OpenRouter API key[/]").strip()
+    api_key = Prompt.ask(f"  [bold cyan]Enter your {provider_display} API key[/]").strip()
 
     if not api_key:
         console.print("  [bold red]No API key provided. Exiting.[/]")
         sys.exit(1)
 
     # Set for current process immediately
-    os.environ["OPENROUTER_API_KEY"] = api_key
+    os.environ[env_key] = api_key
 
     # Persist globally
-    messages = _persist_env_var("OPENROUTER_API_KEY", api_key)
+    messages = _persist_env_var(env_key, api_key)
     console.print("  [green]✓[/] API key set for this session.")
     for msg in messages:
         console.print(f"  [green]✓[/] {msg}")
@@ -311,8 +359,10 @@ def fetch_available_models() -> List[Dict[str, Any]]:
 
     Returns list of model dicts (with 'id' key) for openrouter,
     or list of {'id': name} dicts for env-based models.
+    For langchain gateway, LLM_MODEL_LIST is optional — returns empty list
+    if not set (user can type any model in provider/model_name format).
     """
-    provider = os.getenv("LLM_GATEWAY_PROVIDER", "openrouter").lower()
+    provider = os.getenv("LLM_GATEWAY_PROVIDER", "langchain").lower()
     if provider == "openrouter":
         return _fetch_openrouter_models()
     else:
@@ -507,16 +557,43 @@ class CopilotCLI:
     async def _select_model(self) -> str:
         """Interactive model selection with autocomplete.
 
-        Shows a simple inline prompt with fuzzy autocomplete from all
-        available OpenRouter models (filtered to 130K+ context, tool calls, images).
+        For langchain gateway: LLM_MODEL_LIST is optional. If provided, models are
+        shown as autocomplete suggestions. User can type any model in provider/model_name
+        format (e.g. openai/gpt-5-mini, anthropic/claude-sonnet-4-5-20250929).
+
+        For openrouter gateway: fetches models from the OpenRouter API.
         """
         console.print(Rule("[bold cyan]Select Model[/]", style="cyan"))
         console.print()
+
+        gateway = os.getenv("LLM_GATEWAY_PROVIDER", "langchain").lower()
+        is_langchain = gateway != "openrouter"
 
         with console.status("[cyan]Fetching available models...[/]", spinner="dots"):
             models_data = fetch_available_models()
 
         model_ids = [m["id"] for m in models_data]
+
+        if not model_ids and is_langchain:
+            # LangChain gateway with no model list — free-form input
+            console.print(
+                "  [dim]Enter model as[/] [bold cyan]provider/model_name[/] "
+                "[dim](e.g. openai/gpt-5-mini, anthropic/claude-sonnet-4-5-20250929)[/]"
+            )
+            console.print()
+
+            model_session = PromptSession()
+            try:
+                choice = await model_session.prompt_async(
+                    HTML("<ansicyan><b>  Select Model > </b></ansicyan>"),
+                    default=DEFAULT_MODEL,
+                )
+            except (EOFError, KeyboardInterrupt):
+                choice = DEFAULT_MODEL
+
+            selected = choice.strip() or DEFAULT_MODEL
+            console.print(f"  [green]Selected:[/] [bold]{selected}[/]")
+            return selected
 
         if not model_ids:
             console.print(
@@ -531,9 +608,18 @@ class CopilotCLI:
             custom = Prompt.ask("  Enter model name", console=console)
             return custom.strip() or DEFAULT_MODEL
 
-        console.print(
-            f"  [dim]{len(model_ids)} models available (130K+ context, tool calls, vision)[/]"
-        )
+        if is_langchain:
+            console.print(
+                f"  [dim]{len(model_ids)} models in LLM_MODEL_LIST (type any model or pick from suggestions)[/]"
+            )
+            console.print(
+                "  [dim]Format:[/] [bold cyan]provider/model_name[/] "
+                "[dim](e.g. openai/gpt-5-mini)[/]"
+            )
+        else:
+            console.print(
+                f"  [dim]{len(model_ids)} models available (130K+ context, tool calls, vision)[/]"
+            )
         console.print()
 
         model_session = PromptSession(
@@ -621,7 +707,6 @@ class CopilotCLI:
         """Initialize database, checkpointer, model, and controller."""
         sync_default_skills()
         load_all_dotenv()
-        ensure_openrouter_api_key()
 
         self._render_banner()
 
@@ -630,6 +715,9 @@ class CopilotCLI:
             self.selected_model = await self._select_model()
             self.settings["model"] = self.selected_model
             save_settings(self.settings)
+
+        # ── Ensure provider API key is set for the selected model ──
+        ensure_provider_api_key(self.selected_model)
         console.print()
 
         # ── Browser profile selection ──
