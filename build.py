@@ -132,13 +132,14 @@ def build(target: str | None = None) -> Path:
         "platformdirs",
         # Local src modules
         "src",
-        "src.agent",
         "src.db",
         "src.subagents",
         "src.serializers",
         "src.utils",
         "src.toolkit",
         "src.middlewares",
+        "src.skills",
+        "src.prompts",
     ]
 
     # PyInstaller command
