@@ -1,13 +1,22 @@
 import logging
 from typing import Optional, TYPE_CHECKING, Any, Type
 
-from pydantic import Field, BaseModel
+from pydantic import BaseModel, Field, model_validator
 from deepagents import CompiledSubAgent
 from langchain.agents import create_agent
 from langchain_core.tools import BaseTool
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForToolRun,
+    CallbackManagerForToolRun,
+)
 from langgraph.cache.memory import InMemoryCache
 from langchain_core.language_models import BaseChatModel
 from langchain_community.agent_toolkits import PlayWrightBrowserToolkit
+from langchain_community.tools.playwright.base import BaseBrowserTool
+from langchain_community.tools.playwright.utils import (
+    aget_current_page,
+    get_current_page,
+)
 from langchain_community.tools import DuckDuckGoSearchResults
 from langgraph.errors import GraphInterrupt
 from langchain.agents.middleware import (
@@ -31,6 +40,109 @@ from ..toolkit.web_crawler_tool import (
 from ..toolkit.human_follow_up_tool import follow_up_with_human
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Custom Playwright tools — SPA-friendly overrides
+# ---------------------------------------------------------------------------
+
+
+class _NavigateToolInput(BaseModel):
+    """Input for NavigateTool."""
+
+    url: str = Field(..., description="url to navigate to")
+
+
+class SPANavigateTool(BaseBrowserTool):
+    """Navigate to a URL and wait for the page to fully load (network idle).
+
+    This override uses ``wait_until="networkidle"`` so that JavaScript-heavy
+    SPAs (Twitter/X, React apps, etc.) finish rendering before control is
+    returned.
+    """
+
+    name: str = "navigate_browser"
+    description: str = "Navigate a browser to the specified URL"
+    args_schema: Type[BaseModel] = _NavigateToolInput
+
+    def _run(
+        self,
+        url: str,
+        run_manager: Optional[CallbackManagerForToolRun] = None,
+    ) -> str:
+        if self.sync_browser is None:
+            raise ValueError(f"Synchronous browser not provided to {self.name}")
+        page = get_current_page(self.sync_browser)
+        response = page.goto(url, wait_until="networkidle")
+        status = response.status if response else "unknown"
+        return f"Navigating to {url} returned status code {status}"
+
+    async def _arun(
+        self,
+        url: str,
+        run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
+    ) -> str:
+        if self.async_browser is None:
+            raise ValueError(f"Asynchronous browser not provided to {self.name}")
+        page = await aget_current_page(self.async_browser)
+        response = await page.goto(url, wait_until="networkidle")
+        status = response.status if response else "unknown"
+        return f"Navigating to {url} returned status code {status}"
+
+
+class _ExtractTextToolInput(BaseModel):
+    """Explicit no-args input for ExtractTextTool."""
+
+
+class SPAExtractTextTool(BaseBrowserTool):
+    """Extract visible text from the current page, stripping ``<noscript>`` tags.
+
+    SPA sites like Twitter/X include ``<noscript>`` fallback content (e.g.
+    "JavaScript is disabled") that pollutes extracted text.  This override
+    removes those tags before extraction.
+    """
+
+    name: str = "extract_text"
+    description: str = "Extract all the text on the current webpage"
+    args_schema: Type[BaseModel] = _ExtractTextToolInput
+
+    @model_validator(mode="before")
+    @classmethod
+    def _check_bs4(cls, values: dict) -> Any:
+        try:
+            from bs4 import BeautifulSoup  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "The 'beautifulsoup4' package is required. "
+                "Install it with 'pip install beautifulsoup4'."
+            )
+        return values
+
+    def _run(self, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
+        from bs4 import BeautifulSoup
+
+        if self.sync_browser is None:
+            raise ValueError(f"Synchronous browser not provided to {self.name}")
+        page = get_current_page(self.sync_browser)
+        html_content = page.content()
+        soup = BeautifulSoup(html_content, "lxml")
+        for tag in soup.find_all("noscript"):
+            tag.decompose()
+        return " ".join(text for text in soup.stripped_strings)
+
+    async def _arun(
+        self, run_manager: Optional[AsyncCallbackManagerForToolRun] = None
+    ) -> str:
+        from bs4 import BeautifulSoup
+
+        if self.async_browser is None:
+            raise ValueError(f"Asynchronous browser not provided to {self.name}")
+        page = await aget_current_page(self.async_browser)
+        html_content = await page.content()
+        soup = BeautifulSoup(html_content, "lxml")
+        for tag in soup.find_all("noscript"):
+            tag.decompose()
+        return " ".join(text for text in soup.stripped_strings)
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +231,19 @@ async def get_playwright_tools(cdp_endpoint: str):
 
     adapter = PlayWrightBrowserToolkit.from_browser(async_browser=browser)
     tools = adapter.get_tools()
+
+    # Replace default navigate & extract_text with SPA-friendly versions
+    # that wait for networkidle and strip <noscript> tags respectively.
+    _replacements = {
+        "navigate_browser": SPANavigateTool,
+        "extract_text": SPAExtractTextTool,
+    }
+    tools = [
+        _replacements[t.name].from_browser(async_browser=browser)
+        if t.name in _replacements
+        else t
+        for t in tools
+    ]
 
     # Add the screenshot tool
     tools.append(TakeScreenshotTool(async_browser=adapter.async_browser))
