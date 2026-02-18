@@ -1,7 +1,6 @@
 ---
-id: intro
+id: index
 title: Introduction
-slug: /
 ---
 
 # CIRI — Contextual Intelligence and Reasoning Interface

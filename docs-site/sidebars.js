@@ -1,6 +1,6 @@
 module.exports = {
   tutorialSidebar: [
-    'intro',
+    'index',
     'getting-started',
     {
       type: 'category',
