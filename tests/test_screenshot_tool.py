@@ -1,7 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
-from src.subagents.web_researcher import get_playwright_tools, TakeScreenshotTool
+from ciri.subagents.web_researcher import get_playwright_tools, TakeScreenshotTool
 
 
 async def test_screenshot():

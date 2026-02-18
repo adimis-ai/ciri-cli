@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from src.middlewares.memory import MemoryMiddleware
+from ciri.middlewares.memory import MemoryMiddleware
 
 
 @pytest.fixture

@@ -57,7 +57,7 @@ def get_binary_name(target: str) -> str:
 def build(target: str | None = None) -> Path:
     """Build the ciri CLI binary using PyInstaller."""
     src_dir = Path(__file__).parent
-    src_code_dir = src_dir / "src"
+    src_code_dir = src_dir / "ciri"
     dist_dir = src_dir / "dist"
     build_dir = src_dir / "build"
 
@@ -130,16 +130,16 @@ def build(target: str | None = None) -> Path:
         "opentelemetry",
         "packaging",
         "platformdirs",
-        # Local src modules
-        "src",
-        "src.db",
-        "src.subagents",
-        "src.serializers",
-        "src.utils",
-        "src.toolkit",
-        "src.middlewares",
-        "src.skills",
-        "src.prompts",
+        # Local ciri modules
+        "ciri",
+        "ciri.db",
+        "ciri.subagents",
+        "ciri.serializers",
+        "ciri.utils",
+        "ciri.toolkit",
+        "ciri.middlewares",
+        "ciri.skills",
+        "ciri.prompts",
     ]
 
     # PyInstaller command

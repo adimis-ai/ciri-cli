@@ -1,5 +1,6 @@
 # CIRI Copilot
 
+[![PyPI version](https://img.shields.io/pypi/v/ciri.svg)](https://pypi.org/project/ciri/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 [![uv](https://img.shields.io/badge/built%20with-uv-blueviolet)](https://docs.astral.sh/uv/)
@@ -101,23 +102,30 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ## Installation
 
-### Clone the repo
-
-Using SSH (recommended if you have SSH keys):
+### From PyPI (recommended)
 
 ```bash
-git clone git@github.com:adimis-ai/ciri.git
-cd ciri
+pip install ciri
 ```
+
+Or with [uv](https://docs.astral.sh/uv/) (faster, isolated):
+
+```bash
+uv tool install ciri
+```
+
+After install, the `ciri` command is available globally.
+
+### From source
+
+Clone the repo:
 
 ```bash
 git clone https://github.com/adimis-ai/ciri.git
 cd ciri
 ```
 
-### Install (global vs development)
-
-Option 1 — Global (recommended for users):
+Option 1 — Global install from source (recommended for users):
 
 ```bash
 uv tool install .

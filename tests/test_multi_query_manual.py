@@ -1,8 +1,8 @@
 import asyncio
 import json
 from unittest.mock import MagicMock, patch
-from src.toolkit.human_follow_up_tool import follow_up_with_human
-from src.__main__ import _handle_follow_up, _render_follow_up_interrupt
+from ciri.toolkit.human_follow_up_tool import follow_up_with_human
+from ciri.__main__ import _handle_follow_up, _render_follow_up_interrupt
 
 
 async def test_multi_query_tool():

@@ -1,9 +1,30 @@
 [project]
-name = "ciri-copilot"
-version = "0.1.0"
-description = "Ciri Copilot CLI"
+name = "ciri"
+description = "CIRI Copilot — a local AI agent CLI with skills, toolkits, and subagents"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { file = "LICENSE.md" }
+authors = [
+    { name = "Aditya Mishra", email = "adimis.ai.001@gmail.com" }
+]
+keywords = [
+    "ai", "agent", "cli", "langgraph", "llm", "copilot",
+    "automation", "skills", "toolkits", "subagents", "langchain"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dynamic = ["version"]
 
 dependencies = [
     "typer[all]",
@@ -57,6 +78,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+encrypted = [
+    "pysqlcipher3",
+]
 dev = [
     "pytest",
     "pytest-asyncio",
@@ -70,15 +94,50 @@ dev = [
     "twine",
     "pyinstaller",
     "cyclonedx-bom",
-    "pip-audit"
+    "pip-audit",
 ]
+
+[project.urls]
+Homepage = "https://github.com/adimis-ai/ciri"
+Repository = "https://github.com/adimis-ai/ciri"
+Issues = "https://github.com/adimis-ai/ciri/issues"
+Changelog = "https://github.com/adimis-ai/ciri/releases"
+
+[project.scripts]
+ciri = "ciri.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
+[tool.hatch.version]
+path = "ciri/__init__.py"
 
-[project.scripts]
-ciri = "src.__main__:main"
+[tool.hatch.build.targets.wheel]
+packages = ["ciri"]
+include = [
+    "ciri/**/*.py",
+    "ciri/**/*.md",
+    "ciri/**/*.yaml",
+    "ciri/**/*.yml",
+    "ciri/**/*.json",
+    "ciri/**/*.txt",
+    "ciri/**/*.xsd",
+    "ciri/**/*.ttf",
+    "ciri/**/*.xml",
+    "ciri/**/*.sh",
+    "ciri/**/*.pdf",
+    "ciri/**/*.js",
+    "ciri/**/*.html",
+    "ciri/**/*.gz",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "ciri/",
+    "tests/",
+    "README.md",
+    "LICENSE.md",
+    "CONTRIBUTING.md",
+    "pyproject.toml",
+]

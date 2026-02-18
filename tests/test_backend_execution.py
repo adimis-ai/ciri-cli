@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from src.backend import CiriBackend
+from ciri.backend import CiriBackend
 
 
 @pytest.mark.asyncio

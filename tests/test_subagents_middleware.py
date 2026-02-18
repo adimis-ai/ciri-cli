@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from src.middlewares.subagents import SubAgentMiddleware
+from ciri.middlewares.subagents import SubAgentMiddleware
 
 
 @pytest.fixture

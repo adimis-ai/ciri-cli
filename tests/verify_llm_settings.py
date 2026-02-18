@@ -1,8 +1,8 @@
 import os
 import unittest
 from unittest.mock import patch
-from src.serializers import LLMConfig
-from src.__main__ import _get_models_from_env
+from ciri.serializers import LLMConfig
+from ciri.__main__ import _get_models_from_env
 
 class TestLLMSettings(unittest.TestCase):
     def test_llm_config_gateway_provider_default(self):

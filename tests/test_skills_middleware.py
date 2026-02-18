@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
-from src.middlewares.skills import SkillsMiddleware
+from ciri.middlewares.skills import SkillsMiddleware
 
 
 @pytest.fixture

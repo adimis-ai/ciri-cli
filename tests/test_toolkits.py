@@ -3,7 +3,7 @@ import asyncio
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock, call
-from src.middlewares.toolkits import ToolkitInjectionMiddleware
+from ciri.middlewares.toolkits import ToolkitInjectionMiddleware
 
 
 @pytest.fixture

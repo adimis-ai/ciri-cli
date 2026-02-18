@@ -3,7 +3,7 @@ import shutil
 import unittest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
-from src.toolkit.script_executor_tool import build_script_executor_tool
+from ciri.toolkit.script_executor_tool import build_script_executor_tool
 
 
 class TestScriptExecutor(unittest.TestCase):
