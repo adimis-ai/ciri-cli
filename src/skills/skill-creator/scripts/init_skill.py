@@ -284,9 +284,8 @@ def main():
 
     skill_name = sys.argv[1]
 
-    # Default path is .ciri/skills in the current working directory
-    # This assumes the script is run from the project root or relative to it
-    # Ideally, we'd find the project root, but for now specific relative path is standard
+    # Default path is .ciri/skills in the current working directory.
+    # Always prefer passing --path explicitly (e.g. the WORKING_DIR from skill_builder).
     path = ".ciri/skills"
 
     if len(sys.argv) >= 4 and sys.argv[2] == "--path":

@@ -40,10 +40,14 @@ PROGRESSIVE DISCLOSURE — minimize token cost:
   logic, schemas, templates here. Link from SKILL.md with relative paths.
 
 MANDATORY PROCESS
-1. INIT — Run `python3 {skill_creator_scripts}/init_skill.py <skill-name>` via
-   `execute`. This creates the correct directory structure.
-2. BUILD — Populate resources first (scripts, references), then write SKILL.md
-   connecting them. Use imperative mood ("Run script...", "Analyze...").
+1. INIT — Run `python3 {skill_creator_scripts}/init_skill.py <skill-name> --path {working_dir}`
+   via `execute`. This creates `{working_dir}/<skill-name>/SKILL.md` plus
+   scripts/, references/, and assets/ subdirectories. You MUST pass `--path {working_dir}`
+   or the skill will be created in the wrong location.
+2. BUILD — Edit `{working_dir}/<skill-name>/SKILL.md` (created by step 1). Populate
+   scripts/, references/ first, then update SKILL.md to link them. Use imperative
+   mood ("Run script...", "Analyze..."). SKILL.md is the ONLY accepted instruction
+   file — do NOT create README.md or any other top-level markdown file instead.
 3. PACKAGE — Run `python3 {skill_creator_scripts}/package_skill.py \
    {working_dir}/<skill-name>` via `execute`. Fix any errors immediately.
 
@@ -53,9 +57,12 @@ SKILL.md RULES
   details to references/ and link to them.
 - Skills can reference toolkits in {toolkits_dir} and subagents in {subagents_dir}
   by name for multi-step workflows.
+- The file MUST be named exactly `SKILL.md` — the skills loader only reads this filename.
 
 FORBIDDEN: README.md, INSTALL.md, requirements.txt in skill root. No vague
 descriptions like "A skill for git" — always specify trigger phrases.
+CRITICAL: Never create README.md as a substitute for SKILL.md. Skills without
+SKILL.md are silently ignored and will not be loaded by the agent.
 
 EXAMPLE SKILL.MD:
 ```markdown
