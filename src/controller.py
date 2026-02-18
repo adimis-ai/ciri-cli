@@ -1,4 +1,5 @@
 from langgraph.graph import MessagesState
+from langchain_core.messages import HumanMessage
 from langgraph.types import StateSnapshot, Command
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -27,7 +28,7 @@ class CopilotController:
 
     async def run(
         self,
-        inputs: Union[MessagesState, Command],
+        inputs: Union[MessagesState, HumanMessage, Command],
         config: RunnableConfig,
         *,
         context: Optional[Any] = None,
@@ -47,6 +48,10 @@ class CopilotController:
         Yields:
             tuple: (namespace, stream_type, chunk)
         """
+        # Wrap HumanMessage into MessagesState format
+        if isinstance(inputs, HumanMessage):
+            inputs = {"messages": [inputs]}
+
         # Deserialization of inputs if they are messages in dict form
         if isinstance(inputs, dict) and "messages" in inputs:
             inputs["messages"] = [

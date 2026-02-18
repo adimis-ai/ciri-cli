@@ -328,17 +328,6 @@ qpdf --fix-qdf damaged.pdf repaired.pdf
 qpdf --show-all-pages input.pdf > structure.txt
 ```
 
-#### Advanced Encryption
-```bash
-# Add password protection with specific permissions
-qpdf --encrypt user_pass owner_pass 256 --print=none --modify=none -- input.pdf encrypted.pdf
-
-# Check encryption status
-qpdf --show-encryption encrypted.pdf
-
-# Remove password protection (requires password)
-qpdf --password=secret123 --decrypt encrypted.pdf decrypted.pdf
-```
 
 ## Advanced Python Techniques
 
@@ -565,19 +554,6 @@ def process_large_pdf(pdf_path, chunk_size=10):
 ```
 
 ## Troubleshooting Common Issues
-
-### Encrypted PDFs
-```python
-# Handle password-protected PDFs
-from pypdf import PdfReader
-
-try:
-    reader = PdfReader("encrypted.pdf")
-    if reader.is_encrypted:
-        reader.decrypt("password")
-except Exception as e:
-    print(f"Failed to decrypt: {e}")
-```
 
 ### Corrupted PDFs
 ```bash

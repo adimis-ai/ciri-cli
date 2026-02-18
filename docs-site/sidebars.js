@@ -4,20 +4,68 @@ module.exports = {
     'getting-started',
     {
       type: 'category',
-      label: 'Architecture',
-      items: ['architecture/overview', 'architecture/components', 'architecture/skills-toolkits'],
+      label: 'CLI Reference',
+      collapsed: false,
+      items: [
+        'cli-reference',
+        'examples',
+      ],
     },
     {
       type: 'category',
-      label: 'Development',
-      items: ['development/setup', 'development/run-debug', 'development/build-packaging', 'development/tests-lint']
+      label: 'Features',
+      collapsed: false,
+      items: [
+        'features/memory',
+        'features/hitl',
+        'features/autocomplete',
+        'features/web-research',
+        'features/script-executor',
+      ],
     },
-    'cli-reference',
-    'skills-guide',
-    'toolkits-guide',
-    'subagents-guide',
-    'security',
-    'contributing',
-    'faq'
+    {
+      type: 'category',
+      label: 'Skills',
+      collapsed: false,
+      items: [
+        'built-in-skills/index',
+        'skills-guide',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Toolkits & Subagents',
+      items: [
+        'toolkits-guide',
+        'subagents-guide',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Architecture',
+      items: [
+        'architecture/overview',
+        'architecture/core-harness',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Internals',
+      items: [
+        'internals/middlewares',
+        'internals/self-evolution',
+        'internals/graph-execution',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Project',
+      items: [
+        'roadmap',
+        'contributing',
+        'security',
+        'faq',
+      ],
+    },
   ],
 };

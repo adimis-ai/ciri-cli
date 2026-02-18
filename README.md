@@ -224,7 +224,7 @@ Goodbye!
 - Entry point / CLI: `ciri` starts an interactive REPL-like chat.
 - Model integration: OpenRouter client used for model calls; streaming and selection handled by runtime code.
 - Tools & skills: extensible skills discovered under `.ciri/skills` (skills may include scripts, validators, and metadata).
-- Storage: local encrypted conversation storage — see code for details.
+- Storage: local conversation storage — see code for details.
 
 **Key locations**
 
@@ -248,7 +248,7 @@ Goodbye!
 ## Limitations & privacy
 
 - CIRI relies on third-party model providers (OpenRouter). Provider policies, costs, and behavior apply.
-- Conversations are stored locally and encrypted, but model requests are sent over the network to the chosen provider. Avoid sending sensitive data unless you accept the provider's terms.
+- Conversations are stored locally, but model requests are sent over the network to the chosen provider. Avoid sending sensitive data unless you accept the provider's terms.
 - Offline use requires configuring or running compatible local models — not provided by default.
 
 ---
