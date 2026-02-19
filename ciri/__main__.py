@@ -2664,11 +2664,16 @@ class CopilotAPI:
         self.controller: Optional[CopilotController] = None
         self.settings: dict = load_settings()
         self.selected_model: str = self.settings.get("model", DEFAULT_MODEL)
+        self.selected_browser_profile: Optional[Dict[str, Any]] = (
+            self.settings.get("browser_profile")
+        )
 
     async def setup(self, override_config: Optional[Dict[str, Any]] = None) -> None:
         """Initialize DB, checkpointer, and controller without any UI."""
         if override_config and "model" in override_config:
             self.selected_model = override_config["model"]
+        if override_config and "browser_profile" in override_config:
+            self.selected_browser_profile = override_config["browser_profile"]
 
         sync_default_skills()
         load_all_dotenv()
@@ -2680,6 +2685,11 @@ class CopilotAPI:
         self.checkpointer = AsyncSqliteSaver(conn=conn)
         await self.checkpointer.setup()
 
+        browser_kwargs = {}
+        if self.selected_browser_profile:
+            browser_kwargs["browser_name"] = self.selected_browser_profile.get("browser")
+            browser_kwargs["browser_profile_directory"] = self.selected_browser_profile.get("profile_directory")
+
         backend = CiriBackend(output_callback=lambda line: None)
         llm_config = LLMConfig(model=self.selected_model)
         copilot = await create_copilot(
@@ -2688,6 +2698,7 @@ class CopilotAPI:
             checkpointer=self.checkpointer,
             all_allowed=self.all_allowed,
             backend=backend,
+            **browser_kwargs,
         )
         self.controller = CopilotController(graph=copilot, db=self.db)
 
@@ -2761,29 +2772,281 @@ class CopilotAPI:
         ):
             self._emit(snapshot)
 
+    async def _rebuild_agent(self) -> None:
+        """Rebuild copilot graph in-place, reusing db and checkpointer."""
+        browser_kwargs = {}
+        if self.selected_browser_profile:
+            browser_kwargs["browser_name"] = self.selected_browser_profile.get("browser")
+            browser_kwargs["browser_profile_directory"] = self.selected_browser_profile.get("profile_directory")
+
+        backend = CiriBackend(output_callback=lambda line: None)
+        llm_config = LLMConfig(model=self.selected_model)
+        copilot = await create_copilot(
+            name="Ciri",
+            llm_config=llm_config,
+            checkpointer=self.checkpointer,
+            all_allowed=self.all_allowed,
+            backend=backend,
+            **browser_kwargs,
+        )
+        self.controller = CopilotController(graph=copilot, db=self.db)
+
+    async def cmd_change_model(self, model: str) -> None:
+        """Change model and rebuild copilot."""
+        self.selected_model = model
+        self.settings["model"] = model
+        save_settings(self.settings)
+        await self._rebuild_agent()
+
+    async def cmd_change_browser_profile(self, profile: Dict[str, Any]) -> None:
+        """Change browser profile and rebuild copilot."""
+        self.selected_browser_profile = profile
+        self.settings["browser_profile"] = profile
+        save_settings(self.settings)
+        await self._rebuild_agent()
+
+    async def serve(self, socket_path: Path, pid_path: Path) -> None:
+        """Start persistent Unix socket server. Runs until shutdown command."""
+        import os
+
+        # Remove stale socket
+        if socket_path.exists():
+            socket_path.unlink()
+
+        # Write PID file
+        pid_path.write_text(str(os.getpid()))
+
+        async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+            try:
+                line = await reader.readline()
+                if not line:
+                    return
+                req = json.loads(line.decode())
+                cmd = req.get("cmd")
+
+                async def emit(obj: Any) -> None:
+                    writer.write((json.dumps(obj, cls=CiriJSONEncoder) + "\n").encode())
+                    await writer.drain()
+
+                if cmd == "health":
+                    await emit({"type": "status", "ok": True, "data": {"status": "ok"}})
+
+                elif cmd == "run":
+                    try:
+                        input_data = req.get("input", {})
+                        config = req.get("config")
+                        subgraphs = req.get("subgraphs", True)
+                        context = req.get("context")
+
+                        run_config = {k: v for k, v in config.items() if k != "model"} if config else None
+                        if not run_config or not run_config.get("configurable", {}).get("thread_id"):
+                            thread = self.controller.create_thread()
+                            run_config = {"configurable": {"thread_id": thread["id"]}}
+
+                        async for namespace, stream_type, chunk in self.controller.run(
+                            input_data, run_config, context=context, subgraphs=subgraphs, serialize=True,
+                        ):
+                            if stream_type == "messages":
+                                message_dict, metadata = chunk
+                                await emit({"type": "messages", "namespace": list(namespace),
+                                            "data": {"message": message_dict, "metadata": metadata}})
+                            elif stream_type == "updates":
+                                await emit({"type": "updates", "namespace": list(namespace), "data": chunk})
+                            else:
+                                await emit({"type": stream_type, "namespace": list(namespace), "data": chunk})
+                    except Exception as exc:
+                        await emit({"type": "error", "error": str(exc)})
+
+                elif cmd == "state":
+                    try:
+                        state = await self.controller.get_state(req["config"], serialize=True)
+                        await emit({"type": "state", "data": state})
+                    except Exception as exc:
+                        await emit({"type": "error", "error": str(exc)})
+
+                elif cmd == "history":
+                    try:
+                        async for snapshot in self.controller.get_state_history(
+                            req["config"],
+                            filter=req.get("filter"),
+                            before=req.get("before"),
+                            limit=req.get("limit"),
+                            serialize=True,
+                        ):
+                            await emit({"type": "snapshot", "data": snapshot})
+                    except Exception as exc:
+                        await emit({"type": "error", "error": str(exc)})
+
+                elif cmd == "change_model":
+                    try:
+                        await self.cmd_change_model(req["model"])
+                        await emit({"type": "status", "ok": True, "data": {"model": req["model"]}})
+                    except Exception as exc:
+                        await emit({"type": "error", "error": str(exc)})
+
+                elif cmd == "change_browser_profile":
+                    try:
+                        await self.cmd_change_browser_profile(req["profile"])
+                        await emit({"type": "status", "ok": True, "data": {"profile": req["profile"]}})
+                    except Exception as exc:
+                        await emit({"type": "error", "error": str(exc)})
+
+                elif cmd == "shutdown":
+                    await emit({"type": "status", "ok": True, "data": {"message": "shutting down"}})
+                    writer.close()
+                    raise SystemExit(0)
+
+                else:
+                    await emit({"type": "error", "error": f"Unknown command: {cmd}"})
+
+                await emit({"type": "done"})
+
+            except SystemExit:
+                raise
+            except Exception as exc:
+                try:
+                    writer.write((json.dumps({"type": "error", "error": str(exc)}) + "\n").encode())
+                    await writer.drain()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+
+        server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
+
+        try:
+            async with server:
+                await server.serve_forever()
+        finally:
+            if socket_path.exists():
+                socket_path.unlink()
+            if pid_path.exists():
+                pid_path.unlink()
+
+
+def _api_socket_path() -> Path:
+    """Return path to API server socket."""
+    return get_app_data_dir() / "ciri-api.sock"
+
+
+def _api_pid_path() -> Path:
+    """Return path to API server PID file."""
+    return get_app_data_dir() / "ciri-api.pid"
+
+
+async def _api_client_send(socket_path: Path, cmd_dict: Dict[str, Any]) -> None:
+    """Connect to server socket, send command, stream NDJSON responses to stdout."""
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+    except (FileNotFoundError, ConnectionRefusedError) as exc:
+        sys.stderr.write(json.dumps({"error": f"Cannot connect to server: {exc}"}) + "\n")
+        sys.exit(1)
+
+    try:
+        writer.write((json.dumps(cmd_dict) + "\n").encode())
+        await writer.drain()
+
+        while True:
+            line = await reader.readline()
+            if not line:
+                break
+            obj = json.loads(line.decode())
+            if obj.get("type") == "done":
+                break
+            sys.stdout.write(line.decode())
+            sys.stdout.flush()
+    finally:
+        writer.close()
+
+
+def _ensure_server_running(args: argparse.Namespace) -> Path:
+    """Ensure server is running. Auto-starts if not. Returns socket_path."""
+    import os
+
+    socket_path = _api_socket_path()
+    pid_path = _api_pid_path()
+
+    # Check if already running
+    if socket_path.exists() and pid_path.exists():
+        try:
+            pid = int(pid_path.read_text().strip())
+            os.kill(pid, 0)  # signal 0 = check if process exists
+            return socket_path  # server is alive
+        except (OSError, ValueError):
+            pass  # stale pid or socket — fall through to start
+
+    # Auto-start server as detached background process
+    cmd = [sys.executable, "-m", "ciri", "--api", "--server"]
+    if getattr(args, "all_allowed", False):
+        cmd.append("--all-allowed")
+
+    subprocess.Popen(
+        cmd,
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Wait up to 10s for socket to appear
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        if socket_path.exists():
+            time.sleep(0.1)  # brief extra wait for server readiness
+            return socket_path
+        time.sleep(0.2)
+
+    sys.stderr.write(json.dumps({"error": "Server did not start within 10 seconds"}) + "\n")
+    sys.exit(1)
+
 
 async def run_api(args: argparse.Namespace) -> None:
     """Dispatcher for --api mode."""
 
+    # --health: quick check without needing server (unless server is running)
     if args.health:
+        socket_path = _api_socket_path()
+        if socket_path.exists():
+            try:
+                await _api_client_send(socket_path, {"cmd": "health"})
+                return
+            except Exception:
+                pass
+        # Fallback: just output ok (binary is healthy)
         await CopilotAPI.cmd_health()
         return
 
-    # Parse --config
-    raw_config: Optional[Dict[str, Any]] = None
+    # --server: start persistent server
+    if args.server:
+        raw_config: Optional[Dict[str, Any]] = None
+        if args.config:
+            try:
+                raw_config = json.loads(args.config)
+            except json.JSONDecodeError as exc:
+                sys.stderr.write(json.dumps({"error": f"--config is not valid JSON: {exc}"}) + "\n")
+                sys.exit(1)
+
+        api = CopilotAPI(all_allowed=getattr(args, "all_allowed", False))
+        try:
+            await api.setup(override_config=raw_config)
+        except Exception as exc:
+            sys.stderr.write(json.dumps({"error": f"Server init failed: {exc}"}) + "\n")
+            sys.exit(1)
+
+        await api.serve(_api_socket_path(), _api_pid_path())
+        return
+
+    # All other commands: client mode
+    # Parse --config JSON once
+    raw_config = None
     if args.config:
         try:
             raw_config = json.loads(args.config)
         except json.JSONDecodeError as exc:
             sys.stderr.write(json.dumps({"error": f"--config is not valid JSON: {exc}"}) + "\n")
             sys.exit(1)
-
-    api = CopilotAPI(all_allowed=getattr(args, "all_allowed", False))
-    try:
-        await api.setup(override_config=raw_config)
-    except Exception as exc:
-        sys.stderr.write(json.dumps({"error": f"Initialization failed: {exc}"}) + "\n")
-        sys.exit(1)
 
     if args.run:
         if not args.input:
@@ -2801,22 +3064,22 @@ async def run_api(args: argparse.Namespace) -> None:
             except json.JSONDecodeError as exc:
                 sys.stderr.write(json.dumps({"error": f"--context is not valid JSON: {exc}"}) + "\n")
                 sys.exit(1)
-        try:
-            await api.cmd_run(input_data=input_data, config=raw_config, subgraphs=args.subgraphs, context=context)
-        except Exception as exc:
-            sys.stderr.write(json.dumps({"error": str(exc)}) + "\n")
-            sys.exit(1)
+        socket_path = _ensure_server_running(args)
+        await _api_client_send(socket_path, {
+            "cmd": "run",
+            "input": input_data,
+            "config": raw_config,
+            "subgraphs": args.subgraphs,
+            "context": context,
+        })
         return
 
     if args.state:
         if not raw_config:
             sys.stderr.write(json.dumps({"error": "--state requires --config"}) + "\n")
             sys.exit(1)
-        try:
-            await api.cmd_state(config=raw_config)
-        except Exception as exc:
-            sys.stderr.write(json.dumps({"error": str(exc)}) + "\n")
-            sys.exit(1)
+        socket_path = _ensure_server_running(args)
+        await _api_client_send(socket_path, {"cmd": "state", "config": raw_config})
         return
 
     if args.history:
@@ -2837,14 +3100,34 @@ async def run_api(args: argparse.Namespace) -> None:
             except json.JSONDecodeError as exc:
                 sys.stderr.write(json.dumps({"error": f"--before is not valid JSON: {exc}"}) + "\n")
                 sys.exit(1)
-        try:
-            await api.cmd_history(config=raw_config, filter=filter_dict, before=before_config, limit=args.limit)
-        except Exception as exc:
-            sys.stderr.write(json.dumps({"error": str(exc)}) + "\n")
-            sys.exit(1)
+        socket_path = _ensure_server_running(args)
+        await _api_client_send(socket_path, {
+            "cmd": "history",
+            "config": raw_config,
+            "filter": filter_dict,
+            "before": before_config,
+            "limit": args.limit,
+        })
         return
 
-    sys.stderr.write(json.dumps({"error": "--api requires one of: --health, --run, --state, --history"}) + "\n")
+    if args.change_model is not None:
+        socket_path = _ensure_server_running(args)
+        await _api_client_send(socket_path, {"cmd": "change_model", "model": args.change_model})
+        return
+
+    if args.change_browser_profile is not None:
+        try:
+            profile = json.loads(args.change_browser_profile)
+        except json.JSONDecodeError as exc:
+            sys.stderr.write(json.dumps({"error": f"--change-browser-profile is not valid JSON: {exc}"}) + "\n")
+            sys.exit(1)
+        socket_path = _ensure_server_running(args)
+        await _api_client_send(socket_path, {"cmd": "change_browser_profile", "profile": profile})
+        return
+
+    sys.stderr.write(json.dumps({
+        "error": "--api requires one of: --server, --health, --run, --state, --history, --change-model, --change-browser-profile"
+    }) + "\n")
     sys.exit(1)
 
 
@@ -2898,6 +3181,26 @@ def main():
         "--history",
         action="store_true",
         help="[--api] Stream serialized StateSnapshot history",
+    )
+    api_group.add_argument(
+        "--server",
+        action="store_true",
+        help="[--api] Start persistent server (holds copilot in memory, listens on Unix socket)",
+    )
+    api_group.add_argument(
+        "--change-model",
+        type=str,
+        metavar="MODEL",
+        default=None,
+        help="[--api] Rebuild server copilot with new model (e.g. openai/gpt-5)",
+    )
+    api_group.add_argument(
+        "--change-browser-profile",
+        type=str,
+        metavar="PROFILE_JSON",
+        default=None,
+        dest="change_browser_profile",
+        help='[--api] Rebuild server copilot with new browser profile JSON e.g. \'{"browser":"chrome","profile_directory":"Default"}\'',
     )
 
     # API parameters

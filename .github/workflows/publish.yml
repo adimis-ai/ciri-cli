@@ -38,6 +38,8 @@ jobs:
     name: Auto-tag version
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs: build
     outputs:
       new_tag: ${{ steps.tag_version.outputs.new_tag }}
