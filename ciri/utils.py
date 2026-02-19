@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Optional, List, Tuple, Any
 from dotenv import load_dotenv, set_key
 
+from rich.console import Console as _RichConsole
+from rich.panel import Panel as _RichPanel
+from rich.prompt import Prompt as _RichPrompt
+
 # ---------------------------------------------------------------------------
 # Settings Persistence
 # ---------------------------------------------------------------------------
@@ -1155,3 +1159,162 @@ def list_harnesses(prefix: str = "") -> List[tuple]:
         pass
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# API Key Handling
+# ---------------------------------------------------------------------------
+
+_PROVIDER_KEY_URLS: dict[str, str] = {
+    "openai": "https://platform.openai.com/api-keys",
+    "anthropic": "https://console.anthropic.com/settings/keys",
+    "google": "https://aistudio.google.com/apikey",
+    "google_genai": "https://aistudio.google.com/apikey",
+    "mistralai": "https://console.mistral.ai/api-keys",
+    "cohere": "https://dashboard.cohere.com/api-keys",
+    "groq": "https://console.groq.com/keys",
+    "fireworks": "https://fireworks.ai/account/api-keys",
+    "together": "https://api.together.ai/settings/api-keys",
+    "deepseek": "https://platform.deepseek.com/api_keys",
+    "openrouter": "https://openrouter.ai/keys",
+}
+
+
+def persist_env_var(name: str, value: str) -> list[str]:
+    """Persist an environment variable globally across Mac, Linux, and Windows.
+
+    Writes to:
+    1. CIRI's global .env file (~/.ciri/.env) — read by load_all_dotenv() on every startup
+    2. Shell profile or Windows registry — so the var is available outside CIRI too
+
+    Returns a list of human-readable messages describing where the variable was saved.
+    """
+    messages: list[str] = []
+
+    # ── 1. Always write to CIRI's global .env (cross-platform, always works) ──
+    global_env = get_app_data_dir() / ".env"
+    try:
+        global_env.parent.mkdir(parents=True, exist_ok=True)
+        env_line = f"{name}={value}"
+
+        if global_env.exists():
+            content = global_env.read_text()
+            lines = content.splitlines()
+            found = False
+            new_lines = []
+            for line in lines:
+                if line.strip().startswith(f"{name}="):
+                    new_lines.append(env_line)
+                    found = True
+                else:
+                    new_lines.append(line)
+            if not found:
+                new_lines.append(env_line)
+            global_env.write_text("\n".join(new_lines) + "\n")
+        else:
+            global_env.write_text(env_line + "\n")
+
+        messages.append(
+            f"Saved to [bold]{global_env}[/] (loaded automatically by CIRI)."
+        )
+    except OSError as e:
+        messages.append(f"[yellow]Warning:[/] Could not write to {global_env}: {e}")
+
+    # ── 2. Also persist to shell profile / Windows registry ──
+    if platform.system() == "Windows":
+        try:
+            subprocess.run(
+                ["setx", name, value],
+                check=True,
+                capture_output=True,
+            )
+            messages.append("Saved via [bold]setx[/] (available in new terminals).")
+        except Exception:
+            pass  # CIRI .env is the primary store; this is best-effort
+    else:
+        home = Path.home()
+        shell = os.environ.get("SHELL", "")
+        export_line = f'\nexport {name}="{value}"\n'
+
+        if "zsh" in shell:
+            profile = home / ".zshrc"
+        elif "bash" in shell:
+            profile = (
+                (home / ".bash_profile") if platform.system() == "Darwin" else (home / ".bashrc")
+            )
+        else:
+            profile = home / ".profile"
+
+        try:
+            if profile.exists():
+                content = profile.read_text()
+                if f"export {name}=" in content:
+                    lines = content.splitlines(keepends=True)
+                    new_lines = []
+                    for line in lines:
+                        if line.strip().startswith(f"export {name}="):
+                            new_lines.append(f'export {name}="{value}"\n')
+                        else:
+                            new_lines.append(line)
+                    profile.write_text("".join(new_lines))
+                else:
+                    with open(profile, "a") as f:
+                        f.write(export_line)
+            else:
+                with open(profile, "a") as f:
+                    f.write(export_line)
+            messages.append(
+                f"Saved to [bold]{profile}[/] (available in new terminals)."
+            )
+        except OSError:
+            pass  # CIRI .env is the primary store; this is best-effort
+
+    return messages
+
+
+def prompt_and_persist_api_key(env_key: str, provider_display: str, key_url: str = "") -> str:
+    """Interactively ask for an API key, set it in the current process, and persist it.
+
+    Displays a Rich panel asking for the API key, saves it to the environment,
+    and persists it to CIRI's .env file and shell profile.
+
+    Args:
+        env_key: The environment variable name (e.g., 'OPENROUTER_API_KEY')
+        provider_display: Human-readable provider name (e.g., 'OpenRouter')
+        key_url: Optional URL to get the API key
+
+    Returns:
+        The API key that was entered
+
+    Exits with code 1 if the user provides no key.
+    """
+    console = _RichConsole()
+    url_hint = f"\nGet one at [link={key_url}]{key_url}[/link]" if key_url else ""
+    console.print()
+    console.print(
+        _RichPanel(
+            f"[bold yellow]{env_key}[/] is not set.\n"
+            f"You need a {provider_display} API key to continue.{url_hint}",
+            title="[bold red]API Key Required[/]",
+            border_style="red",
+        )
+    )
+    console.print()
+
+    api_key = _RichPrompt.ask(f"  [bold cyan]Enter your {provider_display} API key[/]").strip()
+
+    if not api_key:
+        console.print("  [bold red]No API key provided. Exiting.[/]")
+        sys.exit(1)
+
+    # Set for current process immediately
+    os.environ[env_key] = api_key
+
+    # Persist globally
+    messages = persist_env_var(env_key, api_key)
+    console.print("  [green]✓[/] API key set for this session.")
+    for msg in messages:
+        console.print(f"  [green]✓[/] {msg}")
+    console.print()
+
+    return api_key

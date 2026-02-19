@@ -62,6 +62,9 @@ from .utils import (
     load_settings,
     save_settings,
     sync_default_skills,
+    persist_env_var,
+    prompt_and_persist_api_key,
+    _PROVIDER_KEY_URLS,
 )
 from .backend import CiriBackend
 from .copilot import create_copilot
@@ -114,99 +117,6 @@ console = Console()
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def _persist_env_var(name: str, value: str) -> list[str]:
-    """Persist an environment variable globally across Mac, Linux, and Windows.
-
-    Writes to:
-    1. CIRI's global .env file (~/.ciri/.env) — read by load_all_dotenv() on every startup
-    2. Shell profile or Windows registry — so the var is available outside CIRI too
-
-    Returns a list of human-readable messages describing where the variable was saved.
-    """
-    messages: list[str] = []
-    system = platform.system()
-
-    # ── 1. Always write to CIRI's global .env (cross-platform, always works) ──
-    global_env = get_app_data_dir() / ".env"
-    try:
-        global_env.parent.mkdir(parents=True, exist_ok=True)
-        env_line = f"{name}={value}"
-
-        if global_env.exists():
-            content = global_env.read_text()
-            lines = content.splitlines()
-            found = False
-            new_lines = []
-            for line in lines:
-                if line.strip().startswith(f"{name}="):
-                    new_lines.append(env_line)
-                    found = True
-                else:
-                    new_lines.append(line)
-            if not found:
-                new_lines.append(env_line)
-            global_env.write_text("\n".join(new_lines) + "\n")
-        else:
-            global_env.write_text(env_line + "\n")
-
-        messages.append(
-            f"Saved to [bold]{global_env}[/] (loaded automatically by CIRI)."
-        )
-    except OSError as e:
-        messages.append(f"[yellow]Warning:[/] Could not write to {global_env}: {e}")
-
-    # ── 2. Also persist to shell profile / Windows registry ──
-    if system == "Windows":
-        try:
-            subprocess.run(
-                ["setx", name, value],
-                check=True,
-                capture_output=True,
-            )
-            messages.append("Saved via [bold]setx[/] (available in new terminals).")
-        except Exception:
-            pass  # CIRI .env is the primary store; this is best-effort
-    else:
-        home = Path.home()
-        shell = os.environ.get("SHELL", "")
-        export_line = f'\nexport {name}="{value}"\n'
-
-        if "zsh" in shell:
-            profile = home / ".zshrc"
-        elif "bash" in shell:
-            profile = (
-                (home / ".bash_profile") if system == "Darwin" else (home / ".bashrc")
-            )
-        else:
-            profile = home / ".profile"
-
-        try:
-            if profile.exists():
-                content = profile.read_text()
-                if f"export {name}=" in content:
-                    lines = content.splitlines(keepends=True)
-                    new_lines = []
-                    for line in lines:
-                        if line.strip().startswith(f"export {name}="):
-                            new_lines.append(f'export {name}="{value}"\n')
-                        else:
-                            new_lines.append(line)
-                    profile.write_text("".join(new_lines))
-                else:
-                    with open(profile, "a") as f:
-                        f.write(export_line)
-            else:
-                with open(profile, "a") as f:
-                    f.write(export_line)
-            messages.append(
-                f"Saved to [bold]{profile}[/] (available in new terminals)."
-            )
-        except OSError:
-            pass  # CIRI .env is the primary store; this is best-effort
-
-    return messages
-
-
 def _extract_provider_from_model(model: str) -> str | None:
     """Extract the provider name from a model string like 'openai/gpt-5-mini' or 'openai:gpt-5-mini'."""
     if "/" in model:
@@ -221,22 +131,6 @@ def _normalize_model_for_langchain(model: str) -> str:
     if "/" in model:
         return model.replace("/", ":", 1)
     return model
-
-
-# Well-known provider API key links
-_PROVIDER_KEY_URLS: dict[str, str] = {
-    "openai": "https://platform.openai.com/api-keys",
-    "anthropic": "https://console.anthropic.com/settings/keys",
-    "google": "https://aistudio.google.com/apikey",
-    "google_genai": "https://aistudio.google.com/apikey",
-    "mistralai": "https://console.mistral.ai/api-keys",
-    "cohere": "https://dashboard.cohere.com/api-keys",
-    "groq": "https://console.groq.com/keys",
-    "fireworks": "https://fireworks.ai/account/api-keys",
-    "together": "https://api.together.ai/settings/api-keys",
-    "deepseek": "https://platform.deepseek.com/api_keys",
-    "openrouter": "https://openrouter.ai/keys",
-}
 
 
 def ensure_provider_api_key(model: str) -> None:
@@ -265,35 +159,8 @@ def ensure_provider_api_key(model: str) -> None:
     if api_key:
         return
 
-    console.print()
-    url_hint = f"\nGet one at [link={key_url}]{key_url}[/link]" if key_url else ""
-    console.print(
-        Panel(
-            f"[bold yellow]{env_key}[/] is not set.\n"
-            f"You need a {provider_display} API key to use CIRI with this model.{url_hint}",
-            title="[bold red]API Key Required[/]",
-            border_style="red",
-        )
-    )
-    console.print()
-
-    api_key = Prompt.ask(
-        f"  [bold cyan]Enter your {provider_display} API key[/]"
-    ).strip()
-
-    if not api_key:
-        console.print("  [bold red]No API key provided. Exiting.[/]")
-        sys.exit(1)
-
-    # Set for current process immediately
-    os.environ[env_key] = api_key
-
-    # Persist globally
-    messages = _persist_env_var(env_key, api_key)
-    console.print("  [green]✓[/] API key set for this session.")
-    for msg in messages:
-        console.print(f"  [green]✓[/] {msg}")
-    console.print()
+    # Prompt and persist using the shared utility
+    prompt_and_persist_api_key(env_key, provider_display, key_url)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

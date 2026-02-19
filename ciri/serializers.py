@@ -29,6 +29,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langchain.agents.middleware.shell_tool import RedactionRule
 
 from .toolkit.human_follow_up_tool import FollowUpInterruptValue
+from .utils import prompt_and_persist_api_key, _PROVIDER_KEY_URLS
 
 logger = logging.getLogger(__name__)
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -89,7 +90,9 @@ class LLMConfig(BaseModel):
             )
             api_key = os.getenv("OPENROUTER_API_KEY")
             if not api_key:
-                raise ValueError("OPENROUTER_API_KEY env variable not set.")
+                api_key = prompt_and_persist_api_key(
+                    "OPENROUTER_API_KEY", "OpenRouter", _PROVIDER_KEY_URLS.get("openrouter", "")
+                )
             config["api_key"] = api_key
             return config
 
@@ -100,7 +103,9 @@ class LLMConfig(BaseModel):
         env_key = f"{provider.upper()}_API_KEY"
         api_key = os.getenv(env_key)
         if not api_key:
-            raise ValueError(f"{env_key} env variable not set for {self.model}")
+            api_key = prompt_and_persist_api_key(
+                env_key, provider.capitalize(), _PROVIDER_KEY_URLS.get(provider.lower(), "")
+            )
 
         config["api_key"] = api_key
         return config
