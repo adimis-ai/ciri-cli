@@ -66,7 +66,7 @@ from .utils import (
 from .backend import CiriBackend
 from .copilot import create_copilot
 from .controller import CopilotController
-from .serializers import LLMConfig
+from .serializers import LLMConfig, CiriJSONEncoder
 
 load_dotenv()
 
@@ -2650,6 +2650,205 @@ class CopilotCLI:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# CopilotAPI  (headless, non-interactive API mode)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class CopilotAPI:
+    """Non-interactive CIRI backend for programmatic use."""
+
+    def __init__(self, all_allowed: bool = False):
+        self.all_allowed = all_allowed
+        self.db: Optional[CopilotDatabase] = None
+        self.checkpointer: Optional[AsyncSqliteSaver] = None
+        self.controller: Optional[CopilotController] = None
+        self.settings: dict = load_settings()
+        self.selected_model: str = self.settings.get("model", DEFAULT_MODEL)
+
+    async def setup(self, override_config: Optional[Dict[str, Any]] = None) -> None:
+        """Initialize DB, checkpointer, and controller without any UI."""
+        if override_config and "model" in override_config:
+            self.selected_model = override_config["model"]
+
+        sync_default_skills()
+        load_all_dotenv()
+
+        db_path = get_app_data_dir() / "ciri.db"
+        self.db = CopilotDatabase(db_path=db_path)
+
+        conn = await aiosqlite.connect(str(db_path))
+        self.checkpointer = AsyncSqliteSaver(conn=conn)
+        await self.checkpointer.setup()
+
+        backend = CiriBackend(output_callback=lambda line: None)
+        llm_config = LLMConfig(model=self.selected_model)
+        copilot = await create_copilot(
+            name="Ciri",
+            llm_config=llm_config,
+            checkpointer=self.checkpointer,
+            all_allowed=self.all_allowed,
+            backend=backend,
+        )
+        self.controller = CopilotController(graph=copilot, db=self.db)
+
+    @staticmethod
+    def _emit(obj: Any) -> None:
+        sys.stdout.write(json.dumps(obj, cls=CiriJSONEncoder) + "\n")
+        sys.stdout.flush()
+
+    @staticmethod
+    async def cmd_health() -> None:
+        sys.stdout.write(json.dumps({"status": "ok"}) + "\n")
+        sys.stdout.flush()
+
+    async def cmd_run(
+        self,
+        input_data: Dict[str, Any],
+        config: Optional[Dict[str, Any]],
+        subgraphs: bool = True,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        # Strip non-LangGraph keys (e.g. "model") from config before passing to graph
+        run_config: Optional[Dict[str, Any]] = None
+        if config:
+            run_config = {k: v for k, v in config.items() if k != "model"}
+
+        # Auto-create thread if no thread_id provided
+        if not run_config or not run_config.get("configurable", {}).get("thread_id"):
+            thread = self.controller.create_thread()
+            run_config = {"configurable": {"thread_id": thread["id"]}}
+
+        async for namespace, stream_type, chunk in self.controller.run(
+            input_data,
+            run_config,
+            context=context,
+            subgraphs=subgraphs,
+            serialize=True,
+        ):
+            if stream_type == "messages":
+                message_dict, metadata = chunk
+                self._emit({
+                    "type": "messages",
+                    "namespace": list(namespace),
+                    "data": {"message": message_dict, "metadata": metadata},
+                })
+            elif stream_type == "updates":
+                self._emit({
+                    "type": "updates",
+                    "namespace": list(namespace),
+                    "data": chunk,
+                })
+            else:
+                self._emit({
+                    "type": stream_type,
+                    "namespace": list(namespace),
+                    "data": chunk,
+                })
+
+    async def cmd_state(self, config: Dict[str, Any]) -> None:
+        state = await self.controller.get_state(config, serialize=True)
+        self._emit(state)
+
+    async def cmd_history(
+        self,
+        config: Dict[str, Any],
+        filter: Optional[Dict[str, Any]] = None,
+        before: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = None,
+    ) -> None:
+        async for snapshot in self.controller.get_state_history(
+            config, filter=filter, before=before, limit=limit, serialize=True
+        ):
+            self._emit(snapshot)
+
+
+async def run_api(args: argparse.Namespace) -> None:
+    """Dispatcher for --api mode."""
+
+    if args.health:
+        await CopilotAPI.cmd_health()
+        return
+
+    # Parse --config
+    raw_config: Optional[Dict[str, Any]] = None
+    if args.config:
+        try:
+            raw_config = json.loads(args.config)
+        except json.JSONDecodeError as exc:
+            sys.stderr.write(json.dumps({"error": f"--config is not valid JSON: {exc}"}) + "\n")
+            sys.exit(1)
+
+    api = CopilotAPI(all_allowed=getattr(args, "all_allowed", False))
+    try:
+        await api.setup(override_config=raw_config)
+    except Exception as exc:
+        sys.stderr.write(json.dumps({"error": f"Initialization failed: {exc}"}) + "\n")
+        sys.exit(1)
+
+    if args.run:
+        if not args.input:
+            sys.stderr.write(json.dumps({"error": "--run requires --input"}) + "\n")
+            sys.exit(1)
+        try:
+            input_data = json.loads(args.input)
+        except json.JSONDecodeError as exc:
+            sys.stderr.write(json.dumps({"error": f"--input is not valid JSON: {exc}"}) + "\n")
+            sys.exit(1)
+        context = None
+        if args.context:
+            try:
+                context = json.loads(args.context)
+            except json.JSONDecodeError as exc:
+                sys.stderr.write(json.dumps({"error": f"--context is not valid JSON: {exc}"}) + "\n")
+                sys.exit(1)
+        try:
+            await api.cmd_run(input_data=input_data, config=raw_config, subgraphs=args.subgraphs, context=context)
+        except Exception as exc:
+            sys.stderr.write(json.dumps({"error": str(exc)}) + "\n")
+            sys.exit(1)
+        return
+
+    if args.state:
+        if not raw_config:
+            sys.stderr.write(json.dumps({"error": "--state requires --config"}) + "\n")
+            sys.exit(1)
+        try:
+            await api.cmd_state(config=raw_config)
+        except Exception as exc:
+            sys.stderr.write(json.dumps({"error": str(exc)}) + "\n")
+            sys.exit(1)
+        return
+
+    if args.history:
+        if not raw_config:
+            sys.stderr.write(json.dumps({"error": "--history requires --config"}) + "\n")
+            sys.exit(1)
+        filter_dict = None
+        if args.filter:
+            try:
+                filter_dict = json.loads(args.filter)
+            except json.JSONDecodeError as exc:
+                sys.stderr.write(json.dumps({"error": f"--filter is not valid JSON: {exc}"}) + "\n")
+                sys.exit(1)
+        before_config = None
+        if args.before:
+            try:
+                before_config = json.loads(args.before)
+            except json.JSONDecodeError as exc:
+                sys.stderr.write(json.dumps({"error": f"--before is not valid JSON: {exc}"}) + "\n")
+                sys.exit(1)
+        try:
+            await api.cmd_history(config=raw_config, filter=filter_dict, before=before_config, limit=args.limit)
+        except Exception as exc:
+            sys.stderr.write(json.dumps({"error": str(exc)}) + "\n")
+            sys.exit(1)
+        return
+
+    sys.stderr.write(json.dumps({"error": "--api requires one of: --health, --run, --state, --history"}) + "\n")
+    sys.exit(1)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -2670,12 +2869,104 @@ def main():
         action="store_true",
         help="Show the version and exit",
     )
+
+    # API mode
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Run in non-interactive API mode (outputs NDJSON to stdout)",
+    )
+
+    # API commands
+    api_group = parser.add_argument_group("API commands (require --api)")
+    api_group.add_argument(
+        "--health",
+        action="store_true",
+        help='[--api] Output {"status": "ok"} and exit',
+    )
+    api_group.add_argument(
+        "--run",
+        action="store_true",
+        help="[--api] Stream NDJSON events for a graph run",
+    )
+    api_group.add_argument(
+        "--state",
+        action="store_true",
+        help="[--api] Output serialized StateSnapshot for a thread",
+    )
+    api_group.add_argument(
+        "--history",
+        action="store_true",
+        help="[--api] Stream serialized StateSnapshot history",
+    )
+
+    # API parameters
+    api_params = parser.add_argument_group("API parameters")
+    api_params.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help="[--run] JSON dict for graph inputs",
+    )
+    api_params.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help='JSON RunnableConfig dict (e.g. {"configurable": {"thread_id": "..."}}) '
+        'or include top-level "model" key to override model',
+    )
+    api_params.add_argument(
+        "--subgraphs",
+        action="store_true",
+        dest="subgraphs",
+        help="[--run] Include subgraph events (default: enabled)",
+    )
+    api_params.add_argument(
+        "--no-subgraphs",
+        action="store_false",
+        dest="subgraphs",
+        help="[--run] Exclude subgraph events",
+    )
+    api_params.add_argument(
+        "--context",
+        type=str,
+        default=None,
+        help="[--run] JSON context dict to pass to the graph",
+    )
+    api_params.add_argument(
+        "--filter",
+        type=str,
+        default=None,
+        help="[--history] JSON filter dict for get_state_history",
+    )
+    api_params.add_argument(
+        "--before",
+        type=str,
+        default=None,
+        help="[--history] JSON RunnableConfig cursor for get_state_history",
+    )
+    api_params.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="[--history] Max number of history snapshots",
+    )
+    parser.set_defaults(subgraphs=True)
+
     args = parser.parse_args()
 
     if args.version:
         from . import __version__
         print(f"CIRI version: {__version__}")
         sys.exit(0)
+
+    if args.api:
+        try:
+            asyncio.run(run_api(args))
+        except KeyboardInterrupt:
+            sys.stderr.write(json.dumps({"error": "interrupted"}) + "\n")
+            sys.exit(1)
+        return
 
     cli = CopilotCLI(all_allowed=args.all_allowed)
     try:
