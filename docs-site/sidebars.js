@@ -62,7 +62,6 @@ module.exports = {
       type: 'category',
       label: 'Project',
       items: [
-        'roadmap',
         'contributing',
         'security',
         'faq',

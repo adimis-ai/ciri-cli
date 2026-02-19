@@ -173,8 +173,3 @@ To override a builder's behavior for your workspace, create a YAML subagent conf
 - After a rebrand (new domain vocabulary, conventions)
 - When you want Ciri to build a new skill or toolkit based on patterns she's observed
 - After onboarding new team members who add new patterns to the codebase
-
-**Automatic triggers** (planned — see [Roadmap](../roadmap.md)):
-- Webhook-triggered sync on Git push
-- Periodic background sync (configurable interval)
-- Sync on context-window approach (SummarizationMiddleware integration)

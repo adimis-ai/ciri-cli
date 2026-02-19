@@ -54,12 +54,6 @@ module.exports = {
           label: 'Skills',
         },
         {
-          type: 'doc',
-          docId: 'roadmap',
-          position: 'left',
-          label: 'Roadmap',
-        },
-        {
           href: 'https://github.com/adimis-ai/ciri',
           label: 'GitHub',
           position: 'right',
@@ -99,7 +93,6 @@ module.exports = {
         {
           title: 'Project',
           items: [
-            { label: 'Roadmap', to: '/docs/roadmap' },
             { label: 'Contributing', to: '/docs/contributing' },
             { label: 'Security', to: '/docs/security' },
             { label: 'FAQ', to: '/docs/faq' },
