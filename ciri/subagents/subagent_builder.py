@@ -56,9 +56,7 @@ DESIGN PRINCIPLES
 - Narrow focus > broad capability. One agent, one domain.
 - Minimal tool set > `tools: all`. Only grant what's needed.
 - Clear triggers > vague descriptions. "Use when asked about X" not "general helper".
-"""
-    + "\n\n"
-    + BUILDER_CORE_PROMPT
+""" + "\n\n" + BUILDER_CORE_PROMPT
 )
 
 

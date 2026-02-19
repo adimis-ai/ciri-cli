@@ -1044,7 +1044,9 @@ def sync_default_skills():
             return
 
         # target_skills_dir already created by get_core_harness_dir()
-        logger.info(f"Syncing default skills from {source_skills_dir} to {target_skills_dir}")
+        logger.info(
+            f"Syncing default skills from {source_skills_dir} to {target_skills_dir}"
+        )
 
         # Copy each skill directory from source to target
         for item in source_skills_dir.iterdir():

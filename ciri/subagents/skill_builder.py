@@ -81,9 +81,7 @@ Run `python3 scripts/merge_pdfs.py --files <list>`
 ## Reference
 See [API docs](references/api_docs.md) for advanced options.
 ```
-"""
-    + "\n\n"
-    + BUILDER_CORE_PROMPT
+""" + "\n\n" + BUILDER_CORE_PROMPT
 )
 
 

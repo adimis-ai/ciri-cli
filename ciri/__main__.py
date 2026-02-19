@@ -148,7 +148,9 @@ def _persist_env_var(name: str, value: str) -> list[str]:
         else:
             global_env.write_text(env_line + "\n")
 
-        messages.append(f"Saved to [bold]{global_env}[/] (loaded automatically by CIRI).")
+        messages.append(
+            f"Saved to [bold]{global_env}[/] (loaded automatically by CIRI)."
+        )
     except OSError as e:
         messages.append(f"[yellow]Warning:[/] Could not write to {global_env}: {e}")
 
@@ -171,7 +173,9 @@ def _persist_env_var(name: str, value: str) -> list[str]:
         if "zsh" in shell:
             profile = home / ".zshrc"
         elif "bash" in shell:
-            profile = (home / ".bash_profile") if system == "Darwin" else (home / ".bashrc")
+            profile = (
+                (home / ".bash_profile") if system == "Darwin" else (home / ".bashrc")
+            )
         else:
             profile = home / ".profile"
 
@@ -193,7 +197,9 @@ def _persist_env_var(name: str, value: str) -> list[str]:
             else:
                 with open(profile, "a") as f:
                     f.write(export_line)
-            messages.append(f"Saved to [bold]{profile}[/] (available in new terminals).")
+            messages.append(
+                f"Saved to [bold]{profile}[/] (available in new terminals)."
+            )
         except OSError:
             pass  # CIRI .env is the primary store; this is best-effort
 
@@ -259,9 +265,7 @@ def ensure_provider_api_key(model: str) -> None:
         return
 
     console.print()
-    url_hint = (
-        f"\nGet one at [link={key_url}]{key_url}[/link]" if key_url else ""
-    )
+    url_hint = f"\nGet one at [link={key_url}]{key_url}[/link]" if key_url else ""
     console.print(
         Panel(
             f"[bold yellow]{env_key}[/] is not set.\n"
@@ -272,7 +276,9 @@ def ensure_provider_api_key(model: str) -> None:
     )
     console.print()
 
-    api_key = Prompt.ask(f"  [bold cyan]Enter your {provider_display} API key[/]").strip()
+    api_key = Prompt.ask(
+        f"  [bold cyan]Enter your {provider_display} API key[/]"
+    ).strip()
 
     if not api_key:
         console.print("  [bold red]No API key provided. Exiting.[/]")
@@ -822,7 +828,9 @@ class CopilotCLI:
 
     def _show_commands_help(self):
         """Display commands and keyboard shortcuts in a 3-column layout."""
-        console.print(Rule("[bold cyan]Available Commands & Shortcuts[/]", style="cyan"))
+        console.print(
+            Rule("[bold cyan]Available Commands & Shortcuts[/]", style="cyan")
+        )
 
         table = Table(show_header=False, box=None, padding=(0, 2), expand=True)
         table.add_column("left_cmd", style="bold cyan", width=16)
@@ -1108,14 +1116,12 @@ class CopilotCLI:
         browser_kwargs = {}
         if self.selected_browser_profile:
             browser_kwargs["browser_name"] = self.selected_browser_profile["browser"]
-            browser_kwargs["browser_profile_directory"] = (
-                self.selected_browser_profile["profile_directory"]
-            )
+            browser_kwargs["browser_profile_directory"] = self.selected_browser_profile[
+                "profile_directory"
+            ]
 
         try:
-            with console.status(
-                "[cyan]Rebuilding copilot agent...[/]", spinner="dots"
-            ):
+            with console.status("[cyan]Rebuilding copilot agent...[/]", spinner="dots"):
                 llm_config = LLMConfig(model=self.selected_model)
 
                 def _on_execute_output(line: str):
@@ -1133,7 +1139,9 @@ class CopilotCLI:
                 )
             console.print("  [green]✓[/] Copilot agent rebuilt")
 
-            with console.status("[cyan]Reinitializing controller...[/]", spinner="dots"):
+            with console.status(
+                "[cyan]Reinitializing controller...[/]", spinner="dots"
+            ):
                 self.controller = CopilotController(graph=copilot, db=self.db)
             console.print("  [green]✓[/] Controller ready")
 
@@ -1164,25 +1172,62 @@ class CopilotCLI:
 
         # Directories to always skip
         SKIP_DIRS = {
-            ".ciri", ".git", ".hg", ".svn",
-            "__pycache__", ".pytest_cache", ".mypy_cache", ".tox",
-            "node_modules", ".npm", ".next", ".nuxt",
-            ".venv", "venv", "env",
-            ".idea", ".vscode",
-            "build", "dist", "out", "target",
-            ".gradle", ".m2", "vendor", "bower_components",
+            ".ciri",
+            ".git",
+            ".hg",
+            ".svn",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".tox",
+            "node_modules",
+            ".npm",
+            ".next",
+            ".nuxt",
+            ".venv",
+            "venv",
+            "env",
+            ".idea",
+            ".vscode",
+            "build",
+            "dist",
+            "out",
+            "target",
+            ".gradle",
+            ".m2",
+            "vendor",
+            "bower_components",
         }
 
         # Key project indicator files
         PROJECT_INDICATORS = {
-            "package.json", "pyproject.toml", "Cargo.toml", "go.mod",
-            "pom.xml", "build.gradle", "Makefile", "CMakeLists.txt",
-            "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
-            "Gemfile", "setup.py", "setup.cfg", "requirements.txt",
-            ".github", ".gitlab-ci.yml", "Jenkinsfile",
-            "README.md", "README.rst", "README.txt",
-            "tsconfig.json", "webpack.config.js", "vite.config.ts",
-            ".env.example", "Procfile", "Taskfile.yml",
+            "package.json",
+            "pyproject.toml",
+            "Cargo.toml",
+            "go.mod",
+            "pom.xml",
+            "build.gradle",
+            "Makefile",
+            "CMakeLists.txt",
+            "Dockerfile",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+            "Gemfile",
+            "setup.py",
+            "setup.cfg",
+            "requirements.txt",
+            ".github",
+            ".gitlab-ci.yml",
+            "Jenkinsfile",
+            "README.md",
+            "README.rst",
+            "README.txt",
+            "tsconfig.json",
+            "webpack.config.js",
+            "vite.config.ts",
+            ".env.example",
+            "Procfile",
+            "Taskfile.yml",
         }
 
         top_level_items = []
@@ -1207,7 +1252,8 @@ class CopilotCLI:
                     # Count immediate children (rough size indicator)
                     try:
                         child_count = sum(
-                            1 for c in entry.iterdir()
+                            1
+                            for c in entry.iterdir()
                             if c.name not in SKIP_DIRS and not c.name.startswith(".")
                         )
                     except PermissionError:
@@ -1247,9 +1293,7 @@ class CopilotCLI:
             console.print(
                 "  [yellow]No meaningful project files detected in the workspace.[/]"
             )
-            console.print(
-                "  [dim]Ciri will ask you what you'd like to build.[/]"
-            )
+            console.print("  [dim]Ciri will ask you what you'd like to build.[/]")
             console.print()
 
             sync_message = (
@@ -1265,14 +1309,18 @@ class CopilotCLI:
             )
         else:
             # Build a rich workspace summary
-            console.print(f"  [green]Found {len(project_files_found)} project indicator(s)[/]")
+            console.print(
+                f"  [green]Found {len(project_files_found)} project indicator(s)[/]"
+            )
             if dir_tree_lines:
                 console.print(f"  [green]Found {len(dir_tree_lines)} directories[/]")
             console.print()
 
             structure_summary = "## Workspace Structure\n"
             if dir_tree_lines:
-                structure_summary += "### Directories\n" + "\n".join(dir_tree_lines) + "\n"
+                structure_summary += (
+                    "### Directories\n" + "\n".join(dir_tree_lines) + "\n"
+                )
 
             indicators_summary = ""
             if project_files_found:
@@ -2051,7 +2099,9 @@ class CopilotCLI:
                     console.print(f"    [dim]{j}.[/] {opt}")
                 console.print()
 
-                answer = await self._prompt_multiline("  Enter number or type your answer > ")
+                answer = await self._prompt_multiline(
+                    "  Enter number or type your answer > "
+                )
 
                 # Resolve numbered selection
                 try:
@@ -2169,9 +2219,13 @@ class CopilotCLI:
                                 padding=(0, 1),
                             )
                         )
-                    
+
                     # Show other args if any
-                    other_args = {k: v for k, v in args.items() if k not in ("file_path", "content")}
+                    other_args = {
+                        k: v
+                        for k, v in args.items()
+                        if k not in ("file_path", "content")
+                    }
                     if other_args:
                         args_text = json.dumps(other_args, indent=2, default=str)
                         console.print(f"[dim]Other Arguments:[/]")
@@ -2487,9 +2541,7 @@ class CopilotCLI:
                     console.print("\n  [dim]Goodbye![/]")
                     break
                 self._last_ctrl_c_time = now
-                console.print(
-                    "\n  [dim]Press Ctrl+C again to exit.[/]"
-                )
+                console.print("\n  [dim]Press Ctrl+C again to exit.[/]")
                 continue
 
             if not user_input:

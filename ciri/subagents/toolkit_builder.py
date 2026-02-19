@@ -42,9 +42,7 @@ DESIGN RULES
 - Must be compatible with `ToolkitInjectionMiddleware` (correct directory structure).
 - No placeholders — use `os.getenv("API_KEY")` for secrets, not hardcoded strings.
 - If you need an API key the user hasn't provided, ask via `follow_up_with_human`.
-"""
-    + "\n\n"
-    + BUILDER_CORE_PROMPT
+""" + "\n\n" + BUILDER_CORE_PROMPT
 )
 
 

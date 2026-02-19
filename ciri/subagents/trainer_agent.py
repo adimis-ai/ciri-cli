@@ -141,9 +141,7 @@ TOOLS
 - `follow_up_with_human` — When the training goal is ambiguous or when the
   workspace has no meaningful content to analyze.
 - Builder sub-agents — Your primary mechanism. You orchestrate, they build.
-"""
-    + "\n\n"
-    + PLAN_AND_RESEARCH_PROMPT
+""" + "\n\n" + PLAN_AND_RESEARCH_PROMPT
 )
 
 
@@ -154,8 +152,8 @@ async def build_trainer_agent(
     cdp_endpoint: Optional[str] = None,
     crawler_browser_config: Optional[CrawlerBrowserConfig] = None,
     web_researcher_agent: Optional[CompiledSubAgent] = None,
-    ciri_dir: Optional[Path] = None,           # kept for backward compatibility
-    core_harness_dir: Optional[Path] = None,   # preferred: OS-level harness dir
+    ciri_dir: Optional[Path] = None,  # kept for backward compatibility
+    core_harness_dir: Optional[Path] = None,  # preferred: OS-level harness dir
     workspace_memory_dir: Optional[Path] = None,  # workspace-specific .ciri/memory/
 ) -> CompiledSubAgent:
     # Build or reuse web researcher

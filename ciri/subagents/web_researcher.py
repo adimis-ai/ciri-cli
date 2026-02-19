@@ -164,9 +164,7 @@ class PlaywrightCDPConnection:
             from playwright.async_api import async_playwright
 
             self._pw = await async_playwright().start()
-            self._browser = await self._pw.chromium.connect_over_cdp(
-                self.cdp_endpoint
-            )
+            self._browser = await self._pw.chromium.connect_over_cdp(self.cdp_endpoint)
         return self._browser
 
 
@@ -240,9 +238,11 @@ async def get_playwright_tools(cdp_endpoint: str):
         "extract_text": SPAExtractTextTool,
     }
     tools = [
-        _replacements[t.name].from_browser(async_browser=browser)
-        if t.name in _replacements
-        else t
+        (
+            _replacements[t.name].from_browser(async_browser=browser)
+            if t.name in _replacements
+            else t
+        )
         for t in tools
     ]
 
