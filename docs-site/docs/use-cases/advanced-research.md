@@ -53,7 +53,7 @@ export OPENROUTER_API_KEY="your-key"
 ```bash
 ciri
 # or
-python -m src.__main__
+python -m ciri.__main__
 ```
 
 3. In the prompt, ask the agent:

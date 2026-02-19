@@ -8,6 +8,6 @@ This page documents deeper integration points and automation patterns.
 
 Example: headless sync and export
 
-  python -c "from src.__main__ import run_headless_sync; run_headless_sync()"
+  python -c "from ciri.__main__ import run_headless_sync; run_headless_sync()"
 
 (Only for advanced users — check source for helper functions and breakage risk.)

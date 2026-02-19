@@ -47,7 +47,7 @@ async def test_cli_rendering():
     val = {"queries": [{"question": "Q1", "options": ["O1", "O2"]}, {"question": "Q2"}]}
 
     # Just call it and see if it crashes
-    with patch("src.__main__.console.print") as mock_print:
+    with patch("ciri.__main__.console.print") as mock_print:
         _render_follow_up_interrupt(val)
 
         # Verify it printed something for both queries
@@ -66,8 +66,8 @@ async def test_cli_handling():
 
     # Mock pt_prompt to return answers
     with (
-        patch("src.__main__.pt_prompt", side_effect=["1", "Answer 2"]) as mock_prompt,
-        patch("src.__main__.run_graph") as mock_run_graph,
+        patch("ciri.__main__.pt_prompt", side_effect=["1", "Answer 2"]) as mock_prompt,
+        patch("ciri.__main__.run_graph") as mock_run_graph,
     ):
 
         await _handle_follow_up(controller, val, config, completer)

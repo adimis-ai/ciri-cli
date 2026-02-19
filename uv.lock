@@ -542,8 +542,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ciri-copilot"
-version = "0.1.0"
+name = "ciri-ai"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
@@ -612,6 +611,9 @@ dev = [
     { name = "types-pyyaml" },
     { name = "types-requests" },
 ]
+encrypted = [
+    { name = "pysqlcipher3" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -661,6 +663,7 @@ requires-dist = [
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pydantic" },
     { name = "pyinstaller", marker = "extra == 'dev'" },
+    { name = "pysqlcipher3", marker = "extra == 'encrypted'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-asyncio", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
@@ -677,7 +680,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'" },
     { name = "types-requests", marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "encrypted"]
 
 [[package]]
 name = "click"
@@ -3806,6 +3809,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/e7/82/28175b2414effca1c
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/24/12818598c362d7f300f18e74db45963dbcb85150324092410c8b49405e42/pyproject_hooks-1.2.0-py3-none-any.whl", hash = "sha256:9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913", size = 10216, upload-time = "2024-09-29T09:24:11.978Z" },
 ]
+
+[[package]]
+name = "pysqlcipher3"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/eb/abc035ae8dda359dff865168dffe39d9a61f115cc6100f53276e6d4554c2/pysqlcipher3-1.2.0.tar.gz", hash = "sha256:3c8033812655947ebf29a809ac5106b2bc69be0274eaccef6b58f4580c8d06c5", size = 102845, upload-time = "2023-01-29T23:14:22.304Z" }
 
 [[package]]
 name = "pytest"
