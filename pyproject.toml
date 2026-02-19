@@ -1,5 +1,5 @@
 [project]
-name = "ciri"
+name = "ciri-ai"
 description = "CIRI Copilot — a local AI agent CLI with skills, toolkits, and subagents"
 readme = "README.md"
 requires-python = ">=3.12"
