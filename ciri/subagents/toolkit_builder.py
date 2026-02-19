@@ -7,43 +7,13 @@ from langchain.agents.middleware import ToolRetryMiddleware
 
 from .._retry_helpers import graphinterrupt_aware_failure
 from ..backend import CiriBackend
-from ..prompts import BUILDER_CORE_PROMPT
+from ..prompts import TOOLKIT_BUILDER_SYSTEM_PROMPT_TEMPLATE
 from ..utils import get_default_filesystem_root, get_core_harness_dir
 from typing import Optional
 from .web_researcher import build_web_researcher_agent, CrawlerBrowserConfig
 from ..toolkit import build_script_executor_tool, follow_up_with_human
 
 WORKING_DIR_DEFAULT = get_core_harness_dir() / "toolkits"
-
-
-TOOLKIT_BUILDER_SYSTEM_PROMPT_TEMPLATE = (
-    """You are the **Toolkit Engineer** for Ciri. You create MCP (Model Context \
-Protocol) servers that give Ciri tool-level access to external APIs and services.
-
-WORKING_DIR: `{working_dir}`
-
-WHAT IS A TOOLKIT?
-A standalone MCP server that exposes tools the agent can call. Each toolkit is a
-directory in WORKING_DIR with either a Python (FastMCP) or Node.js (@modelcontextprotocol/sdk)
-implementation.
-
-MANDATORY PROCESS
-1. RESEARCH — Use `web_research_agent` to study the target API: endpoints, auth,
-   data models. Consult the `mcp-builder` skill for design patterns.
-2. BUILD — Create `{working_dir}/<toolkit-name>/` with:
-   - **Python**: `pyproject.toml` (fastmcp dep) + `src/main.py` (MANDATORY entry point)
-   - **Node**: `package.json` (@modelcontextprotocol/sdk dep) + built entry point
-3. VERIFY — Run `uv sync` or `npm install && npm run build`. Test that the server
-   starts without errors via `execute`.
-
-DESIGN RULES
-- Tools must be intuitive for an AI: clear names (verb-noun), typed inputs,
-  structured outputs.
-- Must be compatible with `ToolkitInjectionMiddleware` (correct directory structure).
-- No placeholders — use `os.getenv("API_KEY")` for secrets, not hardcoded strings.
-- If you need an API key the user hasn't provided, ask via `follow_up_with_human`.
-""" + "\n\n" + BUILDER_CORE_PROMPT
-)
 
 
 async def build_toolkit_builder_agent(

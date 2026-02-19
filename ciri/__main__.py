@@ -1106,7 +1106,7 @@ class CopilotCLI:
         """Rebuild the copilot agent and controller with the current settings.
 
         Called automatically after model or browser profile changes.
-        Creates a fresh thread so the new agent starts clean.
+        Preserves the existing thread so the user can continue the conversation.
         """
         console.print()
         console.print(Rule("[bold cyan]Rebuilding Agent[/]", style="cyan"))
@@ -1145,12 +1145,8 @@ class CopilotCLI:
                 self.controller = CopilotController(graph=copilot, db=self.db)
             console.print("  [green]✓[/] Controller ready")
 
-            # Start a fresh thread so the new agent begins with a clean slate
-            self.current_thread = self.controller.create_thread()
-            self.is_new_thread = True
-            self.settings["thread_id"] = self.current_thread["id"]
-            save_settings(self.settings)
-            console.print("  [green]✓[/] New thread started")
+            # Keep the existing thread active so user can continue the conversation
+            console.print("  [green]✓[/] Continuing on existing thread")
 
         except Exception as e:
             console.print(f"\n  [bold red]Rebuild failed:[/] {e}")
