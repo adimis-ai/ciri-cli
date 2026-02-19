@@ -2894,6 +2894,7 @@ class CopilotAPI:
                 elif cmd == "shutdown":
                     await emit({"type": "status", "ok": True, "data": {"message": "shutting down"}})
                     writer.close()
+                    await writer.wait_closed()
                     raise SystemExit(0)
 
                 else:
@@ -2907,11 +2908,14 @@ class CopilotAPI:
                 try:
                     writer.write((json.dumps({"type": "error", "error": str(exc)}) + "\n").encode())
                     await writer.drain()
+                    writer.write((json.dumps({"type": "done"}) + "\n").encode())
+                    await writer.drain()
                 except Exception:
                     pass
             finally:
                 try:
                     writer.close()
+                    await writer.wait_closed()
                 except Exception:
                     pass
 
@@ -2941,7 +2945,7 @@ async def _api_client_send(socket_path: Path, cmd_dict: Dict[str, Any]) -> None:
     """Connect to server socket, send command, stream NDJSON responses to stdout."""
     try:
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
-    except (FileNotFoundError, ConnectionRefusedError) as exc:
+    except (FileNotFoundError, ConnectionRefusedError, ConnectionResetError) as exc:
         sys.stderr.write(json.dumps({"error": f"Cannot connect to server: {exc}"}) + "\n")
         sys.exit(1)
 
@@ -2953,13 +2957,22 @@ async def _api_client_send(socket_path: Path, cmd_dict: Dict[str, Any]) -> None:
             line = await reader.readline()
             if not line:
                 break
-            obj = json.loads(line.decode())
+            try:
+                obj = json.loads(line.decode())
+            except json.JSONDecodeError:
+                # Forward raw line if server sends non-JSON
+                sys.stderr.write(line.decode())
+                continue
             if obj.get("type") == "done":
                 break
             sys.stdout.write(line.decode())
             sys.stdout.flush()
+    except ConnectionResetError:
+        sys.stderr.write(json.dumps({"error": "Server connection lost"}) + "\n")
+        sys.exit(1)
     finally:
         writer.close()
+        await writer.wait_closed()
 
 
 def _ensure_server_running(args: argparse.Namespace) -> Path:
@@ -2977,6 +2990,12 @@ def _ensure_server_running(args: argparse.Namespace) -> Path:
             return socket_path  # server is alive
         except (OSError, ValueError):
             pass  # stale pid or socket — fall through to start
+
+    # Clean up stale socket/pid so polling loop doesn't see the old files
+    if socket_path.exists():
+        socket_path.unlink()
+    if pid_path.exists():
+        pid_path.unlink()
 
     # Auto-start server as detached background process
     cmd = [sys.executable, "-m", "ciri", "--api", "--server"]
