@@ -27,7 +27,7 @@ Thank you for your interest in making Ciri better. This guide covers how to set 
 
 ```bash
 git clone https://github.com/adimis-ai/ciri.git
-cd ciri/ciri-cli-v1
+cd ciri
 
 # Install with uv (recommended)
 uv sync
@@ -59,7 +59,7 @@ python -m src
 ## Project Structure
 
 ```
-ciri-cli-v1/
+ciri/
 ├── src/
 │   ├── __main__.py          # CLI entrypoint, REPL, CiriCompleter
 │   ├── agent.py             # Ciri agent class, tool registration, MiddlewareBuilder
